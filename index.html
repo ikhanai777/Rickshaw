@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Rickshaw Wala</title>
+  <meta name="description" content="A 3D auto-rickshaw driving game set in the streets of Lahore, Pakistan. Built with three.js." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@700&family=Oswald:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --green: #0f7a3c;
+      --green-2: #0b5c2d;
+      --yellow: #f7c600;
+      --red: #e53935;
+      --panel: rgba(12, 14, 16, 0.62);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --text: #f4f1e8;
+      --muted: rgba(244, 241, 232, 0.66);
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color: var(--text); font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; user-select: none; -webkit-user-select: none; }
+    #game { position: fixed; inset: 0; }
+    #game canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    .vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(20,10,0,0.38) 100%); }
+    .urdu { font-family: 'Noto Nastaliq Urdu', serif; direction: rtl; }
+    .num { font-family: 'Oswald', 'Arial Narrow', sans-serif; }
+
+    /* ---------- loading & menu ---------- */
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #1b2a1f, #0a0d0b 70%); z-index: 50; transition: opacity .6s; }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    .loader { text-align: center; }
+    .loader .spin { width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%; border: 6px dashed var(--yellow); border-top-color: var(--green); animation: spin 1.2s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #load-text { color: var(--muted); font-size: 15px; letter-spacing: .02em; }
+
+    #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: flex-start; padding: 0 6vw; z-index: 40; opacity: 0; pointer-events: none; transition: opacity .6s; background: linear-gradient(90deg, rgba(5,8,6,0.82) 0%, rgba(5,8,6,0.55) 38%, rgba(0,0,0,0) 65%); }
+    #menu.show { opacity: 1; pointer-events: auto; }
+    .menu-card { max-width: 460px; }
+    .menu-card .urdu { font-size: 44px; color: var(--yellow); line-height: 1.9; margin: 0; text-shadow: 0 3px 0 #7a1b1b; }
+    .menu-card h1 { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: clamp(42px, 7vw, 72px); line-height: .95; margin: 0; letter-spacing: .01em; text-transform: uppercase; }
+    .menu-card h1 span { color: var(--yellow); }
+    .menu-card .tag { color: var(--muted); margin: 10px 0 22px; font-size: 16px; line-height: 1.5; }
+    .art-strip { height: 10px; margin: 14px 0 18px; border-radius: 3px; background: repeating-linear-gradient(90deg, #e53935 0 18px, #fdd835 18px 36px, #43a047 36px 54px, #1e88e5 54px 72px, #ff6f00 72px 90px); }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 14px; color: var(--muted); margin-bottom: 26px; }
+    .keys b { color: var(--text); font-family: 'Oswald', sans-serif; font-weight: 600; letter-spacing: .04em; }
+    kbd { display: inline-block; min-width: 24px; padding: 2px 6px; margin-right: 3px; border-radius: 5px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-bottom-width: 3px; font: 600 12px 'Oswald', sans-serif; text-align: center; color: var(--text); }
+    .btn { appearance: none; border: 0; cursor: pointer; font-family: 'Oswald', sans-serif; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: 20px; padding: 14px 34px; border-radius: 12px; color: #111; background: linear-gradient(180deg, #ffd83b, #f2b800); box-shadow: 0 5px 0 #a87a00, 0 10px 30px rgba(247,198,0,0.35); transition: transform .1s; }
+    .btn:hover { transform: translateY(-2px); }
+    .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 #a87a00; }
+
+    /* ---------- HUD ---------- */
+    #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .5s; z-index: 10; }
+    #hud.show { opacity: 1; }
+    .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+    #stats { position: absolute; top: 14px; left: 14px; padding: 10px 16px 11px; min-width: 190px; }
+    #stats .label { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+    #money { font-size: 32px; font-weight: 700; color: var(--yellow); line-height: 1.1; }
+    #stats .row { display: flex; gap: 14px; align-items: baseline; margin-top: 3px; font-size: 13px; color: var(--muted); }
+    #stars { color: var(--yellow); letter-spacing: 1px; font-size: 14px; }
+
+    #topright { position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: auto; }
+    .icons { display: flex; gap: 6px; }
+    .icon-btn { pointer-events: auto; width: 40px; height: 40px; display: grid; place-items: center; font-size: 18px; border-radius: 10px; cursor: pointer; background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); }
+    .icon-btn:hover { background: rgba(40,44,48,0.8); }
+    #tod { font-size: 12px; padding: 5px 10px; border-radius: 999px; color: var(--muted); }
+
+    #job { position: absolute; top: 14px; left: 50%; transform: translate(-50%, -140%); padding: 10px 18px; display: flex; gap: 18px; align-items: center; transition: transform .35s cubic-bezier(.2,.9,.3,1.2); border-color: rgba(255,196,0,0.4); }
+    #job.show { transform: translate(-50%, 0); }
+    #job .dest { display: flex; flex-direction: column; }
+    #job .k { font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); }
+    #job-name { font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; color: #ffd54f; white-space: nowrap; }
+    #job .cell { display: flex; flex-direction: column; align-items: center; min-width: 58px; }
+    #job .cell .v { font-family: 'Oswald', sans-serif; font-size: 18px; }
+    #job-time.late { color: #ff6b5b; }
+
+    #toasts { position: absolute; top: 88px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(92vw, 520px); }
+    .toast { padding: 8px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-border); font-size: 14px; animation: pop .3s ease-out; transition: opacity .5s, transform .5s; text-align: center; }
+    .toast.out { opacity: 0; transform: translateY(-8px); }
+    .toast.good { border-color: rgba(60,255,122,0.5); }
+    .toast.money { border-color: rgba(255,196,0,0.7); color: #ffd54f; font-weight: 600; font-size: 16px; }
+    .toast.warn { border-color: rgba(255,160,0,0.7); color: #ffcc80; }
+    .toast.bad { border-color: rgba(255,80,60,0.8); color: #ff8a80; }
+    @keyframes pop { from { transform: scale(.85); opacity: 0; } }
+
+    #speech { position: absolute; left: 50%; bottom: 150px; transform: translate(-50%, 20px); opacity: 0; transition: all .3s; max-width: min(88vw, 520px); padding: 10px 16px 11px; border-radius: 14px; background: rgba(250,247,238,0.94); color: #1c1c1c; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+    #speech.show { opacity: 1; transform: translate(-50%, 0); }
+    #speech::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -8px; border: 8px solid transparent; border-bottom: 0; border-top-color: rgba(250,247,238,0.94); }
+    #speech-who { font: 600 11px 'Oswald', sans-serif; text-transform: uppercase; letter-spacing: .14em; color: var(--green); }
+    #speech-text { font-size: 16px; font-weight: 500; }
+
+    #hint { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); font-size: 14px; padding: 6px 14px; border-radius: 999px; opacity: 0; transition: opacity .3s; background: rgba(15,122,60,0.85); color: #fff; white-space: nowrap; }
+    #hint.show { opacity: 1; }
+
+    #mapwrap { position: absolute; left: 16px; bottom: 16px; width: 196px; height: 196px; border-radius: 50%; padding: 4px; background: var(--panel); border: 2px solid rgba(247,198,0,0.55); box-shadow: 0 6px 24px rgba(0,0,0,0.4); }
+    #minimap { width: 100%; height: 100%; border-radius: 50%; display: block; }
+    #mapwrap .n { position: absolute; top: -2px; left: 50%; transform: translateX(-50%); font: 700 10px 'Oswald', sans-serif; color: var(--yellow); }
+
+    #speedo { position: absolute; right: 16px; bottom: 16px; width: 190px; height: 214px; }
+    #gauge { position: absolute; top: 0; left: 0; width: 190px; height: 190px; }
+    #speedo .read { position: absolute; top: 58px; width: 190px; text-align: center; }
+    #kmh { font-size: 50px; font-weight: 700; line-height: 1; }
+    #speedo .unit { font-size: 11px; color: var(--muted); letter-spacing: .16em; }
+    #speedo .gear { margin-top: 4px; font-size: 13px; color: var(--muted); }
+    #gear { color: var(--yellow); font-weight: 700; font-size: 16px; }
+    #fuel { position: absolute; bottom: 0; left: 22px; right: 22px; height: 26px; padding: 5px 8px; display: flex; align-items: center; gap: 8px; font: 600 11px 'Oswald', sans-serif; letter-spacing: .1em; color: var(--muted); }
+    #fuel .bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+    #fuel-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #4fc3f7, #81d4fa); transition: width .3s; }
+    #fuel.low #fuel-fill { background: #ff5252; }
+    #fuel.low { color: #ff8a80; animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: .5; } }
+
+    /* ---------- pause ---------- */
+    #pause { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,0.55); z-index: 30; opacity: 0; pointer-events: none; transition: opacity .25s; }
+    #pause.show { opacity: 1; pointer-events: auto; }
+    #pause h2 { font: 700 44px 'Oswald', sans-serif; margin: 0 0 18px; text-align: center; letter-spacing: .06em; }
+
+    /* ---------- touch controls ---------- */
+    #touch { display: none; }
+    body.touch #touch { display: block; }
+    body.touch #hud #speedo { bottom: 150px; transform: scale(.8); transform-origin: right bottom; }
+    body.touch #mapwrap { width: 140px; height: 140px; top: 116px; bottom: auto; left: 12px; }
+    body.touch #speech { bottom: 170px; }
+    body.touch #hint { bottom: 140px; }
+    .tbtn { position: fixed; bottom: 22px; width: 74px; height: 74px; border-radius: 50%; display: grid; place-items: center; font: 700 16px 'Oswald', sans-serif; color: #fff; background: rgba(15,15,15,0.5); border: 2px solid rgba(255,255,255,0.25); pointer-events: auto; touch-action: none; z-index: 12; }
+    .tbtn.active { background: rgba(247,198,0,0.55); border-color: var(--yellow); }
+    #t-left { left: 18px; }
+    #t-right { left: 104px; }
+    #t-gas { right: 18px; width: 84px; height: 84px; background: rgba(15,122,60,0.6); }
+    #t-brake { right: 114px; background: rgba(160,30,30,0.55); }
+    #t-horn { right: 60px; bottom: 118px; width: 60px; height: 60px; font-size: 13px; }
+    #t-cam { left: 60px; bottom: 110px; width: 52px; height: 52px; font-size: 18px; }
+
+    @media (max-width: 700px) {
+      #stats { transform: scale(.85); transform-origin: top left; }
+      #job { gap: 10px; padding: 8px 12px; }
+      #job-name { font-size: 16px; }
+      .menu-card .urdu { font-size: 34px; }
+      #menu { padding: 0 20px; background: rgba(5,8,6,0.72); }
+      .keys { font-size: 13px; }
+    }
+  </style>
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="game"></div>
+  <div class="vignette"></div>
+
+  <div id="loading">
+    <div class="loader">
+      <div class="spin"></div>
+      <div id="load-text">Starting engine…</div>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div class="menu-card">
+      <p class="urdu">رکشہ والا</p>
+      <h1>Rickshaw <span>Wala</span></h1>
+      <div class="art-strip"></div>
+      <p class="tag">Drive a two-stroke auto rickshaw through the chaotic streets of Lahore. Pick up sawariyan, dodge buses, bikes and speed breakers, and earn your daily dihari.</p>
+      <div class="keys">
+        <b><kbd>W</kbd><kbd>S</kbd></b><span>Accelerate · brake / reverse</span>
+        <b><kbd>A</kbd><kbd>D</kbd></b><span>Steer (arrow keys work too)</span>
+        <b><kbd>H</kbd></b><span>Horn — use it generously</span>
+        <b><kbd>Space</kbd></b><span>Handbrake</span>
+        <b><kbd>C</kbd> <kbd>T</kbd></b><span>Camera · time of day</span>
+        <b><kbd>R</kbd> <kbd>M</kbd> <kbd>P</kbd></b><span>Reset to road · mute · pause</span>
+      </div>
+      <button id="start-btn" class="btn">Chalo! Start</button>
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="stats" class="panel">
+      <div class="label">Aaj ki kamai</div>
+      <div id="money" class="num">Rs 0</div>
+      <div class="row"><span>Rides <b id="rides" class="num">0</b></span><span id="stars">★★★★★</span></div>
+    </div>
+
+    <div id="topright">
+      <div class="icons">
+        <div id="b-cam" class="icon-btn" title="Camera (C)">🎥</div>
+        <div id="b-time" class="icon-btn" title="Time of day (T)">🌇</div>
+        <div id="b-mute" class="icon-btn" title="Mute (M)">🔊</div>
+        <div id="b-pause" class="icon-btn" title="Pause (P)">⏸</div>
+      </div>
+      <div id="tod" class="panel">Dopahar</div>
+    </div>
+
+    <div id="job" class="panel">
+      <div class="dest"><span class="k">Manzil</span><span id="job-name">—</span></div>
+      <div class="cell"><span class="k">Distance</span><span id="job-dist" class="v">0 m</span></div>
+      <div class="cell"><span class="k">Time</span><span id="job-time" class="v">0:00</span></div>
+      <div class="cell"><span class="k">Fare</span><span id="job-fare" class="v" style="color:#ffd54f">Rs 0</span></div>
+    </div>
+    <div id="toasts"></div>
+
+    <div id="speech"><div id="speech-who">Sawari</div><div id="speech-text"></div></div>
+    <div id="hint"></div>
+
+    <div id="mapwrap"><canvas id="minimap" width="220" height="220"></canvas><span class="n">▲</span></div>
+
+    <div id="speedo">
+      <canvas id="gauge" width="190" height="190"></canvas>
+      <div class="read">
+        <div id="kmh" class="num">0</div>
+        <div class="unit">KM/H</div>
+        <div class="gear num">GEAR <span id="gear">1</span></div>
+      </div>
+      <div id="fuel" class="panel"><span>CNG</span><div class="bar"><div id="fuel-fill"></div></div></div>
+    </div>
+  </div>
+
+  <div id="touch">
+    <div id="t-left" class="tbtn">◀</div>
+    <div id="t-right" class="tbtn">▶</div>
+    <div id="t-brake" class="tbtn">BRAKE</div>
+    <div id="t-gas" class="tbtn">GAS</div>
+    <div id="t-horn" class="tbtn">HORN</div>
+    <div id="t-cam" class="tbtn">🎥</div>
+  </div>
+
+  <div id="pause">
+    <div style="text-align:center">
+      <h2>Chai break ☕</h2>
+      <button id="resume-btn" class="btn">Resume</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
