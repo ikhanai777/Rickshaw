@@ -302,7 +302,7 @@ export class PlayerRickshaw {
 
     // fuel
     const moved = prev.distanceTo(this.pos);
-    this.fuel = Math.max(0, this.fuel - moved * 0.00011 - (th > 0 ? dt * 0.0002 : 0));
+    this.fuel = Math.max(0, this.fuel - moved * 0.00013 - (th > 0 ? dt * 0.0002 : 0));
 
     // suspension: kerbs, speed breakers, potholes
     const gh = this.city.groundHeight(this.pos.x, this.pos.z);

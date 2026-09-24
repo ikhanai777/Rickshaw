@@ -317,6 +317,7 @@ class Game {
     this.state = 'play';
     $('menu').classList.remove('show');
     $('hud').classList.add('show');
+    document.body.classList.add('playing');
     this.sound.start();
     this.hud.toast('Green markers = sawari waiting. Stop next to them!', 'info');
     this.hud.speech('Ustad', 'Chalo beta, aaj ki dihari banao! Sawariyan dhoondo.');
