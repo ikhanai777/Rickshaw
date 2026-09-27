@@ -3,8 +3,9 @@
 import * as THREE from 'three';
 import {
   N, PITCH, HALF_ROAD, WALK_W, CURB_H, MAIN_ROADS, BAY, FLOOR_H, SHOP_H,
-  FACADE_TILE_W, FACADE_TILE_H, roadCoord, CITY_MIN, CITY_MAX, LOCALITIES,
+  FACADE_TILE_W, FACADE_TILE_H, roadCoord, CITY_MIN, CITY_MAX,
 } from './config.js';
+import { CITY } from './cities.js';
 import { ChunkedBuilder, mat4, col } from './builder.js';
 import { rnd, rand, randInt, pick, chance, clamp } from './util.js';
 import * as TX from './textures.js';
@@ -13,23 +14,17 @@ import { addMotorbike } from './vehicles.js';
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0);
 
-const FACADE_TINTS = [
-  '#efe9dc', '#e8d9b5', '#dccbb0', '#f2e2c4', '#cfd9c9', '#d9c3b0', '#e6c6b8',
-  '#c9d4dc', '#f0e0a8', '#bfcfc0', '#e7d3e0', '#d8b99a', '#f4efe6', '#b9c9d6',
-  '#e3b98f', '#a9c2a4',
-];
-const OLD_TINTS = ['#c9a27e', '#b99a7a', '#d2b48c', '#c4a383', '#b58a6a'];
 const AWNING_TINTS = ['#2f7d32', '#1565c0', '#e65100', '#c62828', '#f9a825', '#00838f', '#6a1b9a', '#546e7a'];
 
 function makeMaterials() {
-  const fac = [0, 1, 2].map((s) => TX.facadeTexture(s));
+  const fac = [0, 1, 2, 3].map((s) => TX.facadeTexture(s));
   const shops = [0, 1].map((s) => TX.shopTexture(s));
-  const signs = TX.signAtlas();
+  const signs = TX.signAtlas(CITY.signs);
   const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, vertexColors: true, ...o });
   const asphalt = TX.asphaltTexture();
   asphalt.repeat.set(1, 1);
   const M = {
-    road: new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.93, metalness: 0 }),
+    road: new THREE.MeshStandardMaterial({ map: asphalt, normalMap: TX.normalMapFrom(asphalt, 1.2, 0.5), roughness: 0.9, metalness: 0 }),
     ground: std({ map: TX.dirtTexture(), vertexColors: false }),
     walk: std({ map: TX.paverTexture() }),
     curb: std({ map: TX.concreteTexture('#b5b0a6') }),
@@ -40,7 +35,8 @@ function makeMaterials() {
     metal: std({ roughness: 0.45, metalness: 0.6 }),
     plastic: std({ roughness: 0.55 }),
     wood: std({ roughness: 0.8 }),
-    foliage: std({ roughness: 0.85, flatShading: true }),
+    foliage: std({ roughness: 0.85 }),
+    leaves: std({ map: TX.leafTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 }),
     grass: std({ map: TX.grassTexture() }),
     marble: std({ map: TX.concreteTexture('#e6e3dc'), roughness: 0.55 }),
     sandstone: std({ map: TX.plasterTexture() }),
@@ -56,15 +52,29 @@ function makeMaterials() {
       map: TX.blotchTexture(), transparent: true, depthWrite: false, roughness: 0.95,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     }),
+    lattice: std({ map: TX.latticeTexture(), side: THREE.DoubleSide }),
+    rope: std({ map: TX.stripeTexture('#d9c9a3', '#a8946c', 16, true), side: THREE.DoubleSide }),
+    clock: std({ map: TX.clockFaceTexture(), roughness: 0.5 }),
+    pakflag: std({ map: TX.pakFlagTexture(), side: THREE.DoubleSide, roughness: 0.8 }),
+    mountain: std({ flatShading: true, roughness: 1 }),
+    water: new THREE.MeshStandardMaterial({ color: 0x4a7a8c, roughness: 0.05, metalness: 0.3 }),
+    ao: new THREE.MeshBasicMaterial({
+      map: TX.aoStripTexture(), color: 0x000000, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+    }),
     lamp: new THREE.MeshStandardMaterial({ color: 0x777777, emissive: 0xffd8a0, emissiveIntensity: 0, roughness: 0.4 }),
     signs: std({ map: signs.map, emissiveMap: signs.emissive, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.6 }),
   };
   fac.forEach((f, i) => {
-    M['facade' + i] = std({ map: f.map, emissiveMap: f.emissive, emissive: 0xffffff, emissiveIntensity: 0 });
+    M['facade' + i] = std({ map: f.map, normalMap: TX.normalMapFrom(f.map, 2.5, 0.5), emissiveMap: f.emissive, emissive: 0xffffff, emissiveIntensity: 0 });
   });
   shops.forEach((s, i) => {
-    M['shop' + i] = std({ map: s.map, emissiveMap: s.emissive, emissive: 0xffffff, emissiveIntensity: 0 });
+    M['shop' + i] = std({ map: s.map, normalMap: TX.normalMapFrom(s.map, 1.5, 0.5), emissiveMap: s.emissive, emissive: 0xffffff, emissiveIntensity: 0 });
   });
+  // relief for the most visible surfaces
+  for (const [k, st] of [['walk', 3], ['brick', 4], ['plaster', 0.5], ['curb', 2], ['roof', 1.5], ['sandstone', 1.5], ['marble', 1]]) {
+    M[k].normalMap = TX.normalMapFrom(M[k].map, st, 0.5);
+  }
   return { M, signs };
 }
 
@@ -85,6 +95,7 @@ export class City {
     this.wirePts = [];
     this.landmarks = [];
     this.lamps = [];
+    this.dhabaSeats = [];
     this.station = null;
 
     this.makeBlocks();
@@ -94,13 +105,17 @@ export class City {
     for (const blk of this.blocks) this.populateBlock(blk);
     this.makeCrossWires();
     this.makeBunting();
+    this.indexColliders();
+    this.makeAnimals();
 
     const group = this.b.build(M, {
       shadowKeys: ['brick', 'plaster', 'roof', 'concrete', 'metal', 'plastic', 'wood', 'foliage', 'marble',
-        'sandstone', 'awning', 'facade0', 'facade1', 'facade2', 'shop0', 'shop1', 'signs', 'lamp', 'median', 'flag'],
+        'sandstone', 'awning', 'facade0', 'facade1', 'facade2', 'facade3', 'shop0', 'shop1', 'signs', 'lamp',
+        'median', 'flag', 'lattice', 'rope', 'pakflag', 'clock', 'leaves'],
     });
     scene.add(group);
     this.group = group;
+    if (CITY.mountains) this.makeMountains(scene);
 
     const wg = new THREE.BufferGeometry();
     wg.setAttribute('position', new THREE.Float32BufferAttribute(this.wirePts, 3));
@@ -113,7 +128,7 @@ export class City {
   // ------------------------------------------------------------ layout ---
 
   makeBlocks() {
-    const names = [...LOCALITIES];
+    const names = [...CITY.localities];
     for (let i = names.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       [names[i], names[j]] = [names[j], names[i]];
@@ -128,11 +143,11 @@ export class City {
           sides: ['minX', 'maxX', 'minZ', 'maxZ'],
           kind: 'normal', name: names[k++ % names.length], solid: true, inner: true,
         };
-        if (i === 3 && j === 3) { blk.kind = 'park'; blk.name = 'Minar-e-Pakistan'; }
-        else if (i === 1 && j === 4) { blk.kind = 'mosque'; blk.name = 'Badshahi Masjid'; }
-        else if (i === 5 && j === 2) { blk.kind = 'station'; blk.name = 'CNG Station'; blk.solid = false; }
-        else if (i === 4 && j === 5) { blk.kind = 'bazaar'; blk.name = 'Anarkali Bazaar'; }
-        else if (i === 2 && j === 1) { blk.kind = 'bazaar'; blk.name = 'Liberty Market'; }
+        const special = CITY.layout[`${i},${j}`];
+        if (special) {
+          [blk.kind, blk.name] = special;
+          if (blk.kind === 'station') blk.solid = false;
+        }
         this.blocks.push(blk);
       }
     }
@@ -333,6 +348,8 @@ export class City {
     if (blk.kind === 'park') return this.makePark(blk);
     if (blk.kind === 'mosque') return this.makeMosque(blk);
     if (blk.kind === 'station') return this.makeStation(blk);
+    if (blk.kind === 'clocktower') return this.makeClockTower(blk);
+    if (blk.kind === 'fort') return this.makeFort(blk);
 
     const lx0 = blk.x0 + WALK_W;
     const lx1 = blk.x1 - WALK_W;
@@ -362,6 +379,7 @@ export class City {
         t += w;
       }
       this.streetFurniture(blk, side);
+      if (blk.kind === 'dhaba' || (blk.inner && chance(0.12))) this.dhaba(blk, side, blk.kind === 'dhaba' ? 3 : 1);
     }
     // interior filler so gaps never reveal the void inside the block
     const fh = rand(5, 7);
@@ -387,9 +405,9 @@ export class City {
     const b = this.b;
     const { C, A, F } = e;
     const base = C.clone().addScaledVector(A, t).setY(CURB_H);
-    const oldCity = blk.i === 0 || blk.j === 0 || (blk.i === 1 && blk.j >= 3) || blk.kind === 'bazaar';
-    const style = oldCity && chance(0.6) ? 2 : randInt(0, 1);
-    const tint = col(style === 2 ? pick(OLD_TINTS) : pick(FACADE_TINTS));
+    const oldCity = CITY.id === 'peshawar' || blk.i === 0 || blk.j === 0 || (blk.i === 1 && blk.j >= 3) || blk.kind === 'bazaar';
+    const style = oldCity && chance(CITY.oldChance) ? pick(CITY.oldStyles) : randInt(0, 1);
+    const tint = col(style >= 2 ? pick(CITY.oldTints) : pick(CITY.tints));
     const H = SHOP_H + floors * FLOOR_H;
     const yaw = Math.atan2(F.x, F.z);
     const pt = (a, y, f) => base.clone().addScaledVector(A, a).addScaledVector(F, f).setY(CURB_H + y);
@@ -440,7 +458,7 @@ export class City {
       const y0 = SHOP_H + 0.05;
       const fr = base.clone().addScaledVector(A, w / 2).addScaledVector(F, 0.06);
       b.box('metal', fr.x, CURB_H + y0 + sh / 2, fr.z, sw + 0.1, sh + 0.1, 0.12, col('#2a2a2a'), yaw);
-      const uv = this.signs.uv(randInt(0, TX.SIGN_COUNT - 1));
+      const uv = this.signs.uv(randInt(0, CITY.signs.length - 1));
       b.quad('signs', pt(a0, y0, 0.125), pt(a0 + sw, y0, 0.125), pt(a0 + sw, y0 + sh, 0.125), pt(a0, y0 + sh, 0.125), uv);
     }
     // awning over the footpath
@@ -451,6 +469,42 @@ export class City {
       const yLow = SHOP_H - 0.75;
       b.quad('awning', pt(0.1, yLow, out), pt(w - 0.1, yLow, out), pt(w - 0.1, yTop, 0.02), pt(0.1, yTop, 0.02), [0, 0, w / 2, 1], tcol);
       b.quad('awning', pt(0.1, yLow - 0.3, out), pt(w - 0.1, yLow - 0.3, out), pt(w - 0.1, yLow, out), pt(0.1, yLow, out), [0, 0, w / 2, 0.2], tcol);
+    }
+
+    // grime / ambient occlusion where the wall meets the footpath
+    b.quad('ao', pt(w, 0.012, 0), pt(0, 0.012, 0), pt(0, 0.012, 1.1), pt(w, 0.012, 1.1), [0, 1, 1, 0]);
+
+    // Peshawari overhanging wooden jharokas
+    if (style === 3 && floors > 0) {
+      for (let f = 0; f < floors; f++) {
+        if (!chance(0.55)) continue;
+        const fy = SHOP_H + f * FLOOR_H;
+        const jw = Math.min(w - 0.6, BAY * randInt(1, 3));
+        const a0 = rand(0.3, w - jw - 0.3);
+        const woodCol = col(pick(['#5b3a22', '#4a2f1b', '#6b4428']));
+        const out = 0.75;
+        b.quad('lattice', pt(a0, fy + 0.5, out), pt(a0 + jw, fy + 0.5, out), pt(a0 + jw, fy + 2.4, out), pt(a0, fy + 2.4, out), [0, 0, jw / 1.2, 1.6], woodCol);
+        b.quad('lattice', pt(a0, fy + 0.5, 0), pt(a0, fy + 0.5, out), pt(a0, fy + 2.4, out), pt(a0, fy + 2.4, 0), [0, 0, 0.6, 1.6], woodCol);
+        b.quad('lattice', pt(a0 + jw, fy + 0.5, out), pt(a0 + jw, fy + 0.5, 0), pt(a0 + jw, fy + 2.4, 0), pt(a0 + jw, fy + 2.4, out), [0, 0, 0.6, 1.6], woodCol);
+        const c0 = base.clone().addScaledVector(A, a0 + jw / 2).addScaledVector(F, out / 2);
+        b.box('wood', c0.x, CURB_H + fy + 0.42, c0.z, jw + 0.2, 0.18, out + 0.15, woodCol, yaw);
+        b.box('wood', c0.x, CURB_H + fy + 2.5, c0.z, jw + 0.35, 0.16, out + 0.3, woodCol, yaw);
+        for (const s2 of [0.2, jw - 0.2]) {
+          const br = base.clone().addScaledVector(A, a0 + s2).addScaledVector(F, 0.35);
+          b.box('wood', br.x, CURB_H + fy + 0.15, br.z, 0.12, 0.45, 0.6, woodCol, yaw);
+        }
+      }
+    }
+    // carpets and clothes hung out on bazaar facades
+    if (blk.kind === 'bazaar' && floors > 0 && chance(0.55)) {
+      const n = randInt(1, 3);
+      for (let k = 0; k < n; k++) {
+        const cw = rand(0.9, 1.5);
+        const a0 = rand(0.2, Math.max(0.3, w - cw - 0.2));
+        const y0 = SHOP_H + 0.9;
+        const cc = col(pick(['#8b1a1a', '#6a1b1b', '#1a2f6b', '#7a4a12', '#2d5a27', '#a0522d']));
+        b.quad('awning', pt(a0, y0, 0.14), pt(a0 + cw, y0, 0.14), pt(a0 + cw, y0 + rand(1.5, 2.2), 0.14), pt(a0, y0 + rand(1.5, 2.2), 0.14), [0, 0, 1, 2], cc);
+      }
     }
 
     // balconies, AC units, banners per floor
@@ -486,7 +540,7 @@ export class City {
       const bh = bw / 8 * 1.6;
       const a0 = (w - bw) / 2;
       const y0 = SHOP_H + FLOOR_H + 0.4;
-      const uv = this.signs.uv(randInt(0, TX.SIGN_COUNT - 1));
+      const uv = this.signs.uv(randInt(0, CITY.signs.length - 1));
       b.quad('signs', pt(a0, y0, 0.08), pt(a0 + bw, y0, 0.08), pt(a0 + bw, y0 + bh, 0.08), pt(a0, y0 + bh, 0.08), uv);
     }
 
@@ -533,7 +587,7 @@ export class City {
         b.box('metal', q.x, roofY + 1.5, q.z, 0.15, 3, 0.15, col('#333'), yaw);
       }
       b.box('metal', p.x, roofY + 3 + bh / 2, p.z, bw + 0.2, bh + 0.2, 0.2, col('#2a2a2a'), yaw);
-      const uv = this.signs.uv(randInt(0, TX.SIGN_COUNT - 1));
+      const uv = this.signs.uv(randInt(0, CITY.signs.length - 1));
       const a0 = (w - bw) / 2;
       b.quad('signs', pt(a0, H + 3, -0.88), pt(a0 + bw, H + 3, -0.88), pt(a0 + bw, H + 3 + bh, -0.88), pt(a0, H + 3 + bh, -0.88), uv);
     }
@@ -676,10 +730,10 @@ export class City {
   // Green & white flag bunting across the bazaar streets
   makeBunting() {
     const b = this.b;
-    const green = col('#01411c');
-    const white = col('#f5f5f5');
+    const green = col(CITY.bunting[0]);
+    const white = col(CITY.bunting[1]);
     for (const blk of this.blocks) {
-      if (blk.kind !== 'bazaar' && blk.kind !== 'park') continue;
+      if (blk.kind !== 'bazaar' && blk.kind !== 'park' && blk.kind !== 'clocktower' && blk.kind !== 'dhaba') continue;
       for (let k = 0; k < 8; k++) {
         const side = pick(['minX', 'maxX', 'minZ', 'maxZ']);
         const e = sideFrame(side, blk.x0, blk.x1, blk.z0, blk.z1);
@@ -713,15 +767,23 @@ export class City {
     b.geom('wood', TRUNK, mat4(x, CURB_H + h / 2, z, rnd() * 6, rand(0.8, 1.2), h, rand(0.8, 1.2)), col('#5d4a38'));
     // whitewashed base (very common on city trees)
     b.geom('wood', TRUNK, mat4(x, CURB_H + 0.5, z, 0, 1.08, 1.0, 1.08), col('#e8e4d8'));
-    const n = randInt(4, 7);
     const R = rand(1.8, 2.8);
-    for (let k = 0; k < n; k++) {
+    const tint = pick(['#b8d890', '#a8c880', '#c8d898', '#98b878', '#d0d8a0']);
+    // dark inner mass so the canopy never looks see-through
+    b.geom('foliage', FOLIAGE, mat4(x, CURB_H + h + 0.9, z, rnd() * 6, R * 0.55, R * 0.4, R * 0.55), col('#2c4020'));
+    // branches
+    for (let k = 0; k < 3; k++) {
       const a = rnd() * Math.PI * 2;
-      const r = rand(0, R * 0.6);
-      const s = rand(1.0, 1.7);
-      b.geom('foliage', FOLIAGE,
-        mat4(x + Math.cos(a) * r, CURB_H + h + rand(0.2, 1.6), z + Math.sin(a) * r, rnd() * 6, s * rand(1, 1.3), s * 0.8, s * rand(1, 1.3)),
-        col(pick(['#3d5f2a', '#4b6e2e', '#5a7a35', '#35522a', '#6b7f3a'])));
+      b.geom('wood', TRUNK, mat4(x + Math.cos(a) * 0.4, CURB_H + h + 0.1, z + Math.sin(a) * 0.4, 0, 0.5, 1.3, 0.5, Math.cos(a) * 0.7, -Math.sin(a) * 0.7), col('#5d4a38'));
+    }
+    // crossed leaf cards
+    const cards = randInt(9, 14);
+    for (let k = 0; k < cards; k++) {
+      const a = rnd() * Math.PI * 2;
+      const r = rand(0, R * 0.7);
+      const s = rand(1.6, 2.6);
+      b.geom('leaves', LEAF, mat4(x + Math.cos(a) * r, CURB_H + h + rand(0.1, 1.8), z + Math.sin(a) * r, rnd() * Math.PI, s, s, s, rand(-0.9, 0.9), rand(-0.5, 0.5)),
+        col(tint).offsetHSL(rand(-0.02, 0.02), 0, rand(-0.08, 0.05)));
     }
     this.circles.push({ x, z, r: 0.35 });
   }
@@ -797,7 +859,7 @@ export class City {
     }
     this.minar(cx, cz);
     this.boxes.push({ minX: lx0, maxX: lx1, minZ: lz0, maxZ: lz1 });
-    this.landmarks.push({ name: 'Minar-e-Pakistan', x: cx, z: cz });
+    this.landmarks.push({ name: blk.name, kind: 'park', x: cx, z: cz });
   }
 
   minar(cx, cz) {
@@ -845,13 +907,16 @@ export class City {
     const lx1 = blk.x1 - WALK_W;
     const lz0 = blk.z0 + WALK_W;
     const lz1 = blk.z1 - WALK_W;
-    const red = col('#b8573a');
+    const whiteStyle = CITY.mosqueStyle === 'white';
+    const red = col(whiteStyle ? '#ece6da' : '#b8573a');
     const white = col('#f2f0ea');
+    const trim = whiteStyle ? col('#9c4a2e') : white;
+    const niche = col(whiteStyle ? '#8a3f26' : '#6a2e1e');
     const y = CURB_H;
     const cx = (lx0 + lx1) / 2;
     const W = lx1 - lx0;
     const D = lz1 - lz0;
-    b.quad('sandstone', V(lx0, y + 0.03, lz1), V(lx1, y + 0.03, lz1), V(lx1, y + 0.03, lz0), V(lx0, y + 0.03, lz0), [0, 0, W / 4, D / 4], col('#c97a5a'));
+    b.quad('sandstone', V(lx0, y + 0.03, lz1), V(lx1, y + 0.03, lz1), V(lx1, y + 0.03, lz0), V(lx0, y + 0.03, lz0), [0, 0, W / 4, D / 4], col(whiteStyle ? '#d8cbb8' : '#c97a5a'));
     // enclosure walls with white arch outlines
     const wallH = 7;
     const walls = [
@@ -859,7 +924,7 @@ export class City {
     ];
     for (const [x, z, w, d] of walls) {
       b.box('sandstone', x, y + wallH / 2, z, w, wallH, d, red);
-      b.box('marble', x, y + wallH + 0.15, z, w + 0.2, 0.3, d + 0.2, white);
+      b.box('marble', x, y + wallH + 0.15, z, w + 0.2, 0.3, d + 0.2, trim);
     }
     // arch niches along the street walls
     for (let x = lx0 + 3; x < lx1 - 3; x += 4) {
@@ -868,8 +933,8 @@ export class City {
         const p1 = V(x + 1.2, y + 1, z);
         const p2 = V(x + 1.2, y + 5, z);
         const p3 = V(x - 1.2, y + 5, z);
-        if (f > 0) b.quad('sandstone', p0, p1, p2, p3, [0, 0, 0.4, 0.8], col('#6a2e1e'));
-        else b.quad('sandstone', p1, p0, p3, p2, [0, 0, 0.4, 0.8], col('#6a2e1e'));
+        if (f > 0) b.quad('sandstone', p0, p1, p2, p3, [0, 0, 0.4, 0.8], niche);
+        else b.quad('sandstone', p1, p0, p3, p2, [0, 0, 0.4, 0.8], niche);
       }
     }
     // prayer hall at the back with three marble domes
@@ -892,7 +957,7 @@ export class City {
     for (const [mx, mz] of [[lx0 + 2, lz0 + 2], [lx1 - 2, lz0 + 2], [lx0 + 2, lz1 - 2], [lx1 - 2, lz1 - 2]]) {
       b.geom('sandstone', new THREE.CylinderGeometry(1.2, 1.6, 30, 8), mat4(mx, y + 15, mz, 0), red);
       for (const h of [10, 20, 29]) {
-        b.geom('marble', new THREE.CylinderGeometry(1.9, 1.9, 0.5, 8), mat4(mx, y + h, mz, 0), white);
+        b.geom('marble', new THREE.CylinderGeometry(1.9, 1.9, 0.5, 8), mat4(mx, y + h, mz, 0), trim);
       }
       for (let k = 0; k < 8; k++) {
         const a = (k / 8) * Math.PI * 2;
@@ -906,7 +971,7 @@ export class City {
     b.quad('sandstone', V(cx + 3.5, y, lz0 - 0.55), V(cx - 3.5, y, lz0 - 0.55), V(cx - 3.5, y + 11, lz0 - 0.55), V(cx + 3.5, y + 11, lz0 - 0.55), [0, 0, 1, 1], col('#4a1f12'));
     for (const s of [-1, 1]) b.geom('marble', new THREE.LatheGeometry(onion(1.1), 12), mat4(cx + s * 6, y + 18, lz0 + 1, 0), white);
     this.boxes.push({ minX: lx0, maxX: lx1, minZ: lz0, maxZ: lz1 });
-    this.landmarks.push({ name: 'Badshahi Masjid', x: cx, z: (lz0 + lz1) / 2 });
+    this.landmarks.push({ name: blk.name, kind: 'mosque', x: cx, z: (lz0 + lz1) / 2 });
     for (const side of blk.sides) this.streetFurniture(blk, side);
   }
 
@@ -955,13 +1020,302 @@ export class City {
     b.box('concrete', sx, y + 9.2, sz, 2.6, 1.2, 0.55, col('#f7d117'));
     this.circles.push({ x: sx, z: sz, r: 0.4 });
     this.station = { x: cx, z: cz, hw: cw / 2, hd: cd / 2 };
-    this.landmarks.push({ name: 'CNG Station', x: cx, z: cz });
+    this.landmarks.push({ name: 'CNG Station', kind: 'station', x: cx, z: cz });
     for (const side of blk.sides) this.streetFurniture(blk, side);
+  }
+
+
+  // Four textured walls + optional top, with UVs in metres / tile
+  prism(key, cx, cz, w, d, y0, y1, color, tile = 4, top = null) {
+    const b = this.b;
+    const x0 = cx - w / 2;
+    const x1 = cx + w / 2;
+    const z0 = cz - d / 2;
+    const z1 = cz + d / 2;
+    const h = (y1 - y0) / tile;
+    b.quad(key, V(x0, y0, z1), V(x1, y0, z1), V(x1, y1, z1), V(x0, y1, z1), [0, 0, w / tile, h], color);
+    b.quad(key, V(x1, y0, z0), V(x0, y0, z0), V(x0, y1, z0), V(x1, y1, z0), [0, 0, w / tile, h], color);
+    b.quad(key, V(x1, y0, z1), V(x1, y0, z0), V(x1, y1, z0), V(x1, y1, z1), [0, 0, d / tile, h], color);
+    b.quad(key, V(x0, y0, z0), V(x0, y0, z1), V(x0, y1, z1), V(x0, y1, z0), [0, 0, d / tile, h], color);
+    if (top) b.quad(top, V(x0, y1, z1), V(x1, y1, z1), V(x1, y1, z0), V(x0, y1, z0), [0, 0, w / tile, d / tile], color);
+  }
+
+  // Cylinder with UVs scaled so textures keep a real-world size
+  cylinder(key, x, y, z, r, h, color, tile = 4, seg = 16, rTop = r) {
+    const g = new THREE.CylinderGeometry(rTop, r, h, seg, 1);
+    const uv = g.attributes.uv;
+    const circ = (2 * Math.PI * r) / tile;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * circ, uv.getY(i) * (h / tile));
+    this.b.geom(key, g, mat4(x, y + h / 2, z, 0), color);
+  }
+
+  // Ghanta Ghar: Cunningham clock tower on a paved chowk
+  makeClockTower(blk) {
+    const b = this.b;
+    const lx0 = blk.x0 + WALK_W;
+    const lx1 = blk.x1 - WALK_W;
+    const lz0 = blk.z0 + WALK_W;
+    const lz1 = blk.z1 - WALK_W;
+    const cx = (lx0 + lx1) / 2;
+    const cz = (lz0 + lz1) / 2;
+    const y = CURB_H;
+    b.quad('walk', V(lx0, y + 0.03, lz1), V(lx1, y + 0.03, lz1), V(lx1, y + 0.03, lz0), V(lx0, y + 0.03, lz0), [0, 0, (lx1 - lx0) / 3.5, (lz1 - lz0) / 3.5], col('#e8dcc8'));
+    // railing around the chowk
+    const railCol = col('#1f4a2a');
+    for (const [ax, az, bx, bz] of [[lx0, lz0, lx1, lz0], [lx1, lz0, lx1, lz1], [lx1, lz1, lx0, lz1], [lx0, lz1, lx0, lz0]]) {
+      const L = Math.hypot(bx - ax, bz - az);
+      const yaw = Math.atan2(bx - ax, bz - az) + Math.PI / 2;
+      b.box('plaster', (ax + bx) / 2, y + 0.3, (az + bz) / 2, L, 0.6, 0.3, col('#d8cfbe'), yaw);
+      b.box('metal', (ax + bx) / 2, y + 1.1, (az + bz) / 2, L, 0.05, 0.05, railCol, yaw);
+      for (let t = 0; t <= L; t += 0.35) b.box('metal', ax + ((bx - ax) * t) / L, y + 0.85, az + ((bz - az) * t) / L, 0.03, 0.5, 0.03, railCol, yaw);
+    }
+    const brickCol = col('#ffffff');
+    this.prism('marble', cx, cz, 8, 8, y, y + 1.2, col('#e8e2d6'), 2, 'marble');
+    this.prism('brick', cx, cz, 5, 5, y + 1.2, y + 20, brickCol, 4);
+    // corner pilasters
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      this.prism('brick', cx + sx * 2.35, cz + sz * 2.35, 0.9, 0.9, y + 1.2, y + 21, brickCol, 4, 'roof');
+      b.geom('marble', new THREE.LatheGeometry(ONION(0.55), 10), mat4(cx + sx * 2.35, y + 25.4, cz + sz * 2.35, 0), col('#f2efe6'));
+      this.prism('plaster', cx + sx * 2.35, cz + sz * 2.35, 0.8, 0.8, y + 21, y + 25.4, col('#efe3c8'), 2);
+    }
+    this.prism('plaster', cx, cz, 5.8, 5.8, y + 20, y + 20.6, col('#e9dcc0'), 2, 'plaster');
+    this.prism('plaster', cx, cz, 4.8, 4.8, y + 20.6, y + 25.5, col('#efe3c8'), 2, 'plaster');
+    // four clock faces
+    const cf = 3.0;
+    const fy = y + 23;
+    const o = 2.42;
+    b.quad('clock', V(cx - cf / 2, fy - cf / 2, cz + o), V(cx + cf / 2, fy - cf / 2, cz + o), V(cx + cf / 2, fy + cf / 2, cz + o), V(cx - cf / 2, fy + cf / 2, cz + o));
+    b.quad('clock', V(cx + cf / 2, fy - cf / 2, cz - o), V(cx - cf / 2, fy - cf / 2, cz - o), V(cx - cf / 2, fy + cf / 2, cz - o), V(cx + cf / 2, fy + cf / 2, cz - o));
+    b.quad('clock', V(cx + o, fy - cf / 2, cz + cf / 2), V(cx + o, fy - cf / 2, cz - cf / 2), V(cx + o, fy + cf / 2, cz - cf / 2), V(cx + o, fy + cf / 2, cz + cf / 2));
+    b.quad('clock', V(cx - o, fy - cf / 2, cz - cf / 2), V(cx - o, fy - cf / 2, cz + cf / 2), V(cx - o, fy + cf / 2, cz + cf / 2), V(cx - o, fy + cf / 2, cz - cf / 2));
+    this.prism('marble', cx, cz, 5.4, 5.4, y + 25.5, y + 26.1, col('#f2efe6'), 2, 'marble');
+    b.geom('marble', new THREE.CylinderGeometry(1.6, 1.9, 2.2, 8), mat4(cx, y + 27.2, cz, 0), col('#efe3c8'));
+    b.geom('marble', new THREE.LatheGeometry(ONION(1.8), 16), mat4(cx, y + 28.3, cz, 0), col('#f5f2ea'));
+    b.geom('metal', new THREE.CylinderGeometry(0.05, 0.14, 2.5, 6), mat4(cx, y + 28.3 + 1.8 * 2.4 + 1, cz, 0), col('#c9a227'));
+    this.circles.push({ x: cx, z: cz, r: 4.5 });
+    // fountain and benches around the chowk
+    for (const [dx, dz] of [[-16, -14], [16, 14]]) {
+      this.cylinder('marble', cx + dx, y, cz + dz, 3, 0.6, col('#e0dbd0'), 2, 20);
+      b.geom('water', new THREE.CircleGeometry(2.7, 24).rotateX(-Math.PI / 2), mat4(cx + dx, y + 0.55, cz + dz, 0));
+      this.cylinder('marble', cx + dx, y + 0.6, cz + dz, 0.35, 1.4, col('#e0dbd0'), 2, 10);
+      this.circles.push({ x: cx + dx, z: cz + dz, r: 3.1 });
+    }
+    for (let k = 0; k < 16; k++) {
+      const a = rnd() * Math.PI * 2;
+      const r = rand(18, 23);
+      this.tree(cx + Math.cos(a) * r, cz + Math.sin(a) * r);
+    }
+    this.boxes.push({ minX: lx0, maxX: lx1, minZ: lz0, maxZ: lz1 });
+    this.landmarks.push({ name: blk.name, kind: 'clocktower', x: cx, z: cz });
+    for (const side of blk.sides) this.streetFurniture(blk, side);
+  }
+
+  // Bala Hisar: massive brick fort on a mound with round bastions and the national flag
+  makeFort(blk) {
+    const b = this.b;
+    const lx0 = blk.x0 + WALK_W;
+    const lx1 = blk.x1 - WALK_W;
+    const lz0 = blk.z0 + WALK_W;
+    const lz1 = blk.z1 - WALK_W;
+    const cx = (lx0 + lx1) / 2;
+    const cz = (lz0 + lz1) / 2;
+    const y = CURB_H;
+    const inset0 = 1;
+    const inset1 = 7;
+    const mh = 7;
+    const brick = col('#d9b9a0');
+    // sloped brick glacis
+    const a0 = [lx0 + inset0, lz0 + inset0, lx1 - inset0, lz1 - inset0];
+    const a1 = [lx0 + inset1, lz0 + inset1, lx1 - inset1, lz1 - inset1];
+    const top = y + mh;
+    const L = (a0[2] - a0[0]) / 4;
+    b.quad('brick', V(a0[0], y, a0[3]), V(a0[2], y, a0[3]), V(a1[2], top, a1[3]), V(a1[0], top, a1[3]), [0, 0, L, 2.3], brick);
+    b.quad('brick', V(a0[2], y, a0[1]), V(a0[0], y, a0[1]), V(a1[0], top, a1[1]), V(a1[2], top, a1[1]), [0, 0, L, 2.3], brick);
+    b.quad('brick', V(a0[2], y, a0[3]), V(a0[2], y, a0[1]), V(a1[2], top, a1[1]), V(a1[2], top, a1[3]), [0, 0, L, 2.3], brick);
+    b.quad('brick', V(a0[0], y, a0[1]), V(a0[0], y, a0[3]), V(a1[0], top, a1[3]), V(a1[0], top, a1[1]), [0, 0, L, 2.3], brick);
+    b.quad('roof', V(a1[0], top, a1[3]), V(a1[2], top, a1[3]), V(a1[2], top, a1[1]), V(a1[0], top, a1[1]), [0, 0, 6, 6], col('#b8a58a'));
+    // curtain walls with merlons
+    const wh = 9;
+    const iw = a1[2] - a1[0];
+    for (const [x, z, w, d] of [[cx, a1[1] + 0.6, iw, 1.2], [cx, a1[3] - 0.6, iw, 1.2], [a1[0] + 0.6, cz, 1.2, iw], [a1[2] - 0.6, cz, 1.2, iw]]) {
+      this.prism('brick', x, z, w, d, top, top + wh, brick, 4, 'roof');
+      const n = Math.floor(Math.max(w, d) / 1.6);
+      for (let k = 0; k < n; k++) {
+        const t = (k + 0.5) / n - 0.5;
+        b.box('brick', x + (w > d ? t * w : 0), top + wh + 0.45, z + (w > d ? 0 : t * d), w > d ? 0.8 : 1.2, 0.9, w > d ? 1.2 : 0.8, brick);
+      }
+    }
+    // round bastions at corners and mid-walls
+    const bast = [[a1[0], a1[1]], [a1[2], a1[1]], [a1[0], a1[3]], [a1[2], a1[3]], [cx, a1[1]], [cx, a1[3]], [a1[0], cz], [a1[2], cz]];
+    for (const [bx, bz] of bast) {
+      this.cylinder('brick', bx, y + 1, bz, 4.2, mh + wh, brick, 4, 18, 3.4);
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        b.box('brick', bx + Math.cos(a) * 3.1, top + wh + 1.45, bz + Math.sin(a) * 3.1, 0.9, 0.9, 0.9, brick);
+      }
+    }
+    // gate facing the street
+    b.quad('sandstone', V(cx + 2.5, top, a1[1] - 0.02), V(cx - 2.5, top, a1[1] - 0.02), V(cx - 2.5, top + 6, a1[1] - 0.02), V(cx + 2.5, top + 6, a1[1] - 0.02), [0, 0, 1, 1], col('#3a2418'));
+    // ramp up to the gate
+    b.quad('roof', V(cx + 3, y + 0.02, a0[1]), V(cx - 3, y + 0.02, a0[1]), V(cx - 3, top, a1[1]), V(cx + 3, top, a1[1]), [0, 0, 1, 3], col('#9e8c74'));
+    // flag
+    b.geom('metal', new THREE.CylinderGeometry(0.08, 0.12, 14, 8), mat4(cx, top + 7, cz, 0), col('#dddddd'));
+    b.geom('pakflag', new THREE.PlaneGeometry(4.5, 3, 8, 1).toNonIndexed(), mat4(cx + 2.3, top + 12.5, cz, 0));
+    this.boxes.push({ minX: lx0, maxX: lx1, minZ: lz0, maxZ: lz1 });
+    this.landmarks.push({ name: blk.name, kind: 'fort', x: cx, z: cz });
+    for (const side of blk.sides) this.streetFurniture(blk, side);
+  }
+
+  // Chai dhaba on the footpath: charpais, tea stall and a tandoor / chapli kabab tawa
+  dhaba(blk, side, count = 1) {
+    const b = this.b;
+    const e = sideFrame(side, blk.x0, blk.x1, blk.z0, blk.z1);
+    const { C, A, F } = e;
+    const yaw = Math.atan2(F.x, F.z);
+    for (let n = 0; n < count; n++) {
+      const t0 = rand(10, e.len - 18);
+      const at = (t, inset) => C.clone().addScaledVector(A, t).addScaledVector(F, -inset);
+      const mid = at(t0 + 3, 2);
+      if (this.circles.some((c) => Math.abs(c.x - mid.x) < 6 && Math.abs(c.z - mid.z) < 6)) continue;
+      // stall
+      const st = at(t0, 2.6);
+      b.box('wood', st.x, CURB_H + 0.5, st.z, 1.6, 1.0, 0.8, col(pick(['#2e7d32', '#1565c0', '#8d6e63'])), yaw);
+      b.box('metal', st.x, CURB_H + 1.05, st.z, 0.5, 0.12, 0.4, col('#222'), yaw);
+      b.geom('metal', KETTLE, mat4(st.x, CURB_H + 1.25, st.z, 0, 1, 1, 1), col('#d0d4d8'));
+      if (CITY.id === 'peshawar') {
+        const tw = at(t0 - 1.4, 2.6);
+        b.geom('metal', new THREE.CylinderGeometry(0.6, 0.55, 0.08, 16).toNonIndexed(), mat4(tw.x, CURB_H + 0.9, tw.z, 0), col('#1a1a1a'));
+        b.box('wood', tw.x, CURB_H + 0.43, tw.z, 1.1, 0.86, 1.1, col('#6d4c41'), yaw);
+        this.circles.push({ x: tw.x, z: tw.z, r: 0.8 });
+      } else {
+        const td = at(t0 - 1.4, 2.6);
+        b.geom('plastic', new THREE.CylinderGeometry(0.45, 0.6, 1.0, 12).toNonIndexed(), mat4(td.x, CURB_H + 0.5, td.z, 0), col('#a0522d'));
+        this.circles.push({ x: td.x, z: td.z, r: 0.7 });
+      }
+      this.circles.push({ x: st.x, z: st.z, r: 0.9 });
+      // charpais
+      const beds = randInt(2, 3);
+      for (let k = 0; k < beds; k++) {
+        const c0 = at(t0 + 2.2 + k * 2.4, 1.9);
+        const frame = col('#7a5534');
+        b.box('rope', c0.x, CURB_H + 0.45, c0.z, 1.9, 0.04, 0.95, col('#ffffff'), yaw);
+        for (const [la, lf] of [[-0.9, -0.43], [0.9, -0.43], [-0.9, 0.43], [0.9, 0.43]]) {
+          const q = c0.clone().addScaledVector(A, la).addScaledVector(F, lf);
+          b.box('wood', q.x, CURB_H + 0.22, q.z, 0.08, 0.46, 0.08, frame, yaw);
+        }
+        for (const lf of [-0.46, 0.46]) {
+          const q = c0.clone().addScaledVector(F, lf);
+          b.box('wood', q.x, CURB_H + 0.45, q.z, 1.95, 0.07, 0.07, frame, yaw);
+        }
+        this.circles.push({ x: c0.x, z: c0.z, r: 1.0 });
+        const seats = randInt(1, 3);
+        for (let s = 0; s < seats; s++) {
+          const q = c0.clone().addScaledVector(A, -0.6 + s * 0.6).addScaledVector(F, 0.25);
+          this.dhabaSeats.push({ x: q.x, z: q.z, yaw: yaw + (chance(0.5) ? 0 : Math.PI), h: CURB_H + 0.47 });
+        }
+      }
+      // bulb string above
+      for (let k = 0; k < 10; k++) {
+        const q = at(t0 - 1 + k * 0.9, 2.2);
+        b.geom('lamp', BULB, mat4(q.x, CURB_H + 2.6 - Math.sin((k / 9) * Math.PI) * 0.3, q.z, 0), col('#fff'));
+      }
+    }
+  }
+
+  // Cows (desi zebu), buffaloes and goats standing about on footpaths
+  makeAnimals() {
+    const b = this.b;
+    const count = CITY.animals;
+    for (let n = 0; n < count; n++) {
+      const s = this.randomCurbSpot();
+      if (!s) continue;
+      const x = s.x - s.fx * 0.4;
+      const z = s.z - s.fz * 0.4;
+      const yaw = rnd() * Math.PI * 2;
+      const kind = chance(0.25) ? 'goat' : 'cow';
+      const m = (lx, ly, lz, sx, sy, sz, rx = 0) => mat4(0, 0, 0, yaw).multiply(mat4(lx, ly, lz, 0, sx, sy, sz, rx));
+      const put = (key, lx, ly, lz, sx, sy, sz, c, rx = 0) => {
+        const mm = mat4(x, CURB_H, z, 0).multiply(m(lx, ly, lz, sx, sy, sz, rx));
+        b.geom(key, BOXG, mm, c);
+      };
+      if (kind === 'cow') {
+        const coat = col(pick(['#ebe6dc', '#e2dccf', '#d7d0c4', '#2a2624', '#7b4a2a', '#5b5550']));
+        const lying = chance(0.35);
+        const by = lying ? 0.45 : 1.0;
+        put('concrete', 0, by, 0, 0.62, 0.72, 1.55, coat);
+        put('concrete', 0, by + 0.42, 0.45, 0.4, 0.3, 0.35, coat); // hump
+        put('concrete', 0, by + 0.15, 0.95, 0.34, 0.38, 0.55, coat, 0.5); // head
+        put('concrete', 0, by - 0.25, 0.35, 0.2, 0.35, 0.5, coat); // dewlap
+        for (const sx of [-0.14, 0.14]) put('marble', sx, by + 0.42, 1.05, 0.05, 0.25, 0.05, col('#e8e0c8'), -0.4); // horns
+        put('concrete', 0, by + 0.05, -0.85, 0.06, 0.7, 0.06, coat, 0.2); // tail
+        if (!lying) for (const [lx, lz] of [[-0.2, 0.55], [0.2, 0.55], [-0.2, -0.55], [0.2, -0.55]]) put('concrete', lx, 0.35, lz, 0.13, 0.7, 0.13, coat);
+        this.circles.push({ x, z, r: 0.9 });
+      } else {
+        const coat = col(pick(['#2a2420', '#5b4636', '#e8e2d6', '#3a2e26']));
+        put('concrete', 0, 0.6, 0, 0.32, 0.38, 0.8, coat);
+        put('concrete', 0, 0.85, 0.48, 0.2, 0.24, 0.3, coat, 0.4);
+        for (const sx of [-0.13, 0.13]) put('concrete', sx, 0.85, 0.45, 0.2, 0.05, 0.1, coat);
+        for (const [lx, lz] of [[-0.1, 0.3], [0.1, 0.3], [-0.1, -0.3], [0.1, -0.3]]) put('concrete', lx, 0.22, lz, 0.07, 0.45, 0.07, coat);
+        this.circles.push({ x, z, r: 0.5 });
+      }
+    }
+  }
+
+  // Khyber hills on the horizon: a continuous ring of noisy ridges
+  makeMountains(scene) {
+    const SEG = 220;
+    const RINGS = 14;
+    const r0 = 430;
+    const r1 = 760;
+    const waves = [];
+    for (let k = 0; k < 7; k++) waves.push([randInt(2, 40) + k * 3, rand(0, 6.28), rand(0.3, 1) / (k + 1)]);
+    const ridge = (a) => {
+      let v = 0;
+      for (const [f, p, amp] of waves) v += Math.sin(a * f + p) * amp;
+      return 0.55 + v * 0.45;
+    };
+    const pos = [];
+    const colr = [];
+    const idx = [];
+    const c = new THREE.Color();
+    for (let j = 0; j <= RINGS; j++) {
+      const t = j / RINGS;
+      const r = r0 + (r1 - r0) * t;
+      for (let i = 0; i <= SEG; i++) {
+        const a = (i / SEG) * Math.PI * 2;
+        // higher towards the west (Khyber Pass side)
+        const side = 0.65 + (Math.cos(a - 3.4) + 1) * 0.35;
+        const prof = Math.sin(Math.min(1, t * 1.6) * Math.PI * 0.5) * (1 - Math.max(0, t - 0.75) * 1.5);
+        const rough = Math.sin(a * 97 + j * 1.7) * 0.06 + Math.sin(a * 211 - j * 2.3) * 0.04;
+        const h = Math.max(0, (ridge(a + t * 0.4) + rough) * prof * side * 190 - 10);
+        pos.push(Math.cos(a) * r, h - 6, Math.sin(a) * r);
+        const k = Math.min(1, h / 180);
+        c.set('#8f7c62').lerp(new THREE.Color('#6a5c4c'), k * 0.8).offsetHSL(0, 0, (rough * 1.5));
+        colr.push(c.r, c.g, c.b);
+      }
+    }
+    for (let j = 0; j < RINGS; j++) {
+      for (let i = 0; i < SEG; i++) {
+        const a0 = j * (SEG + 1) + i;
+        const b0 = a0 + SEG + 1;
+        idx.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, this.M.mountain);
+    m.material.side = THREE.DoubleSide;
+    m.frustumCulled = false;
+    scene.add(m);
   }
 
   // ------------------------------------------------------------ collision ---
 
   indexColliders() {
+    this.grid.clear();
     const C = 12;
     this.cell = C;
     const add = (i, j, item) => {
@@ -1092,11 +1446,19 @@ const POLE_SQUARE = new THREE.CylinderGeometry(0.09, 0.17, 1, 4, 1).toNonIndexed
 const POLE_ROUND = new THREE.CylinderGeometry(0.08, 0.13, 1, 8, 1).toNonIndexed();
 const TRUNK = new THREE.CylinderGeometry(0.14, 0.22, 1, 7).toNonIndexed();
 const FOLIAGE = new THREE.IcosahedronGeometry(1, 1).toNonIndexed();
+const LEAF = new THREE.PlaneGeometry(1, 1).toNonIndexed();
 const SHRUB = new THREE.IcosahedronGeometry(1, 0).toNonIndexed();
 const WHEEL = new THREE.CylinderGeometry(0.5, 0.5, 1, 12).toNonIndexed();
 const FRUIT = new THREE.OctahedronGeometry(0.08, 0).toNonIndexed();
 const UMBRELLA = new THREE.ConeGeometry(1.2, 0.5, 8, 1, true).toNonIndexed();
 const DISH = new THREE.CylinderGeometry(0.5, 0.08, 0.2, 14, 1, true).toNonIndexed();
+const BOXG = new THREE.BoxGeometry(1, 1, 1).toNonIndexed();
+const KETTLE = new THREE.CylinderGeometry(0.16, 0.2, 0.32, 10).toNonIndexed();
+const BULB = new THREE.SphereGeometry(0.05, 6, 4).toNonIndexed();
+const ONION = (r) => [
+  [0, 0], [r * 0.95, 0], [r * 1.12, r * 0.45], [r * 1.08, r * 0.9], [r * 0.8, r * 1.3], [r * 0.45, r * 1.6],
+  [r * 0.15, r * 1.85], [r * 0.08, r * 2.1], [0, r * 2.4],
+].map(([a, c]) => new THREE.Vector2(a, c));
 const BUMP = (() => {
   // half cylinder lying across the road, flat side down
   const g = new THREE.CylinderGeometry(0.5, 0.5, 1, 12, 1, false, 0, Math.PI);

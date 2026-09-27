@@ -204,10 +204,18 @@ export function createRickshawModel({ color = '#0f7a3c', trim = '#f7c600', drive
 
 // ---------------------------------------------------------------------------
 
+export const LIVERIES = {
+  green: { name: 'Lahori Green', color: '#0f7a3c', trim: '#f7c600' },
+  blue: { name: 'Pindi Blue', color: '#0d47a1', trim: '#ffffff' },
+  red: { name: 'Peshawari Red', color: '#b71c1c', trim: '#f7c600' },
+  black: { name: 'Kala Jadoo', color: '#16181a', trim: '#e53935' },
+  gold: { name: 'Sunehri', color: '#c9a227', trim: '#1b5e20' },
+};
+
 export class PlayerRickshaw {
-  constructor(scene, city) {
+  constructor(scene, city, livery = LIVERIES.green) {
     this.city = city;
-    this.model = createRickshawModel({ color: '#0f7a3c', trim: '#f7c600' });
+    this.model = createRickshawModel({ color: livery.color, trim: livery.trim });
     scene.add(this.model.root);
     this.pos = new THREE.Vector3(0, 0, 0);
     this.yaw = 0;
@@ -234,6 +242,11 @@ export class PlayerRickshaw {
     this.headlight.position.set(0, 1.12, 1.42);
     this.headlight.target.position.set(0, 0, 12);
     this.model.tilt.add(this.headlight, this.headlight.target);
+  }
+
+  exhaustPoint(out) {
+    out.set(0.42, 0.32, -1.4);
+    return this.model.tilt.localToWorld(out);
   }
 
   get forward() {
@@ -373,8 +386,10 @@ export class PlayerRickshaw {
     events.push({ type: 'crash', strength: clamp(impact / 10, 0.2, 1) });
   }
 
-  // Resolve overlap with a moving obstacle (traffic) modelled as a circle
-  collideDynamic(x, z, r, events) {
+  // Contact with a traffic vehicle modelled as a circle. Returns contact info so the
+  // traffic system can shove the other vehicle; `share` is how much of the overlap the
+  // rickshaw itself gives up (small for light cars, most of it against a truck).
+  contactVehicle(x, z, r, share) {
     const fx = Math.sin(this.yaw);
     const fz = Math.cos(this.yaw);
     for (const off of [0.75, -0.55]) {
@@ -388,16 +403,13 @@ export class PlayerRickshaw {
         const d = Math.sqrt(d2);
         const nx = dx / d;
         const nz = dz / d;
-        this.pos.x += nx * (rr - d);
-        this.pos.z += nz * (rr - d);
+        const pen = rr - d;
+        this.pos.x += nx * pen * share;
+        this.pos.z += nz * pen * share;
         const into = -(fx * nx + fz * nz) * this.speed;
-        if (into > 0) {
-          this.speed *= 0.3;
-          if (into > 2) this.crash(into, events);
-        }
-        return true;
+        return { nx, nz, pen, into, off, px: x + nx * r, pz: z + nz * r };
       }
     }
-    return false;
+    return null;
   }
 }

@@ -4,23 +4,60 @@ import * as THREE from 'three';
 import { Person, randomLook } from './people.js';
 import { CURB_H } from './config.js';
 import { beamTexture } from './textures.js';
-import { rand, pick, clamp } from './util.js';
+import { rand, pick, clamp, chance } from './util.js';
+import { CITY } from './cities.js';
 
-const PICKUP_LINES = [
-  'Bhai, {d} chalo ge?',
-  'Assalam-o-Alaikum! {d} jana hai, jaldi karo.',
-  'Rickshaw! {d} tak kitne ka? Chalo theek hai.',
-  'Bhai sahab, {d} le chalo, meter wala scene nahi.',
-  'Jaldi {d} pohanchao, class shuru hone wali hai!',
-  'Beta, {d} jana hai. Aaram se chalana.',
-  'Oye rickshaw! {d}! Double paise dunga agar jaldi pohanchaya.',
-];
 const CRASH_LINES = [
   'Oye! Aaram se bhai!', 'Maar do ge kya?!', 'Rickshaw hai ya jahaz?', 'Ya Allah khair!',
   'Bhai licence hai tumhare paas?', 'Meri kamar toot gayi!',
 ];
 const BUMP_LINES = ['Uff yeh speed breaker!', 'Bhai zara dekh ke!', 'Sarak hai ya khet?'];
-const PAY_LINES = ['Shukriya bhai, yeh lo.', 'Allah Hafiz, jeete raho!', 'Zabardast! Yeh lo paise.', 'JazakAllah bhai.'];
+
+// What the other driver shouts after you ram them
+const DRIVER_LINES = {
+  car: [
+    'Oye! Andha hai kya? Nai gaari thi meri!', 'Insurance tera abba dega?!', 'Rickshaw walay, tujhe tou main dekh lunga!',
+    'Abey! Side mirror tor diya!', 'Bumper ka kharcha kaun dega?!', 'Chal nikal, warna police bulata hoon!',
+    'Yeh sarak teri jageer hai kya?!', 'Kal hi service karwai thi yaar!', 'Oye! Number note kar liya hai maine!',
+    'Mere abbu MNA hain, pata hai?!', 'Gaari hai ya bulldozer?!', 'Bhai, dent nikalwane ke 5000 lagte hain!',
+  ],
+  bus: [
+    'Oye chotay! Bus se panga?!', 'Hat ja rastay se, warna kuchal dunga!', 'Sawariyan gir gayin andar, pagal!',
+    'Conductor! Iska number likh!', 'Tujhe bus nazar nahi aayi?!',
+  ],
+  truck: [
+    'Khair de! Zra khyal kawa!', 'Oye! Truck ki art kharab kar di!', 'Sau saal purana Bedford hai, izzat kar!',
+    'Khyber se aa raha hoon, tujh jaisa nahi dekha!', 'Chain toot gayi meri! Jalne walay ka moonh kala!',
+  ],
+  bike: [
+    'Hai meri CD 70!', 'Oye! Mera tou naya silencer tha!', 'Helmet pehna hota tou…', 'Ammi ki dawai le ke ja raha tha!',
+    'Bhai, qist bhi abhi baqi hai!', 'Pillion wali ko bhi gira diya!',
+  ],
+  rickshaw: [
+    'Apne hi bhai ko thok diya?!', 'Rickshaw union mein shikayat karunga!', 'Oye, tera meter tou theek hai?!',
+    'Ustad, dhandha kharab mat kar!', 'Hum bhi rickshaw wale hain, zara soch!',
+  ],
+  tonga: [
+    'Oye! Ghora dar gaya!', 'Mera Badshah ghora hai, izzat se!', 'Tonga purani sawari hai, lehaaz kar!',
+  ],
+  donkey: ['Gadha bhi tujh se samajhdar hai!', 'Mera gadha bechara…', 'Oye! Saaman gir gaya!'],
+};
+const DRIVER_NAMES = {
+  sedan: 'Corolla Uncle', hatch: 'Mehran Wala', van: 'Van Driver', pickup: 'Datsun Wala', bus: 'Bus Driver',
+  truck: 'Truck Driver', bike: 'Motorcycle Wala', rickshaw: 'Rickshaw Wala', tonga: 'Tonga Wala', donkey: 'Gadha Gaari Wala',
+};
+// What your passenger says when you ram another vehicle
+const CARHIT_PASSENGER = [
+  'Bhai gaari ko thok diya, ab bhago!', 'Main tou yahin utar jaata hoon…', 'GTA khel rahe ho kya?',
+  'Allah maaf kare, kya driving hai!', 'Mera dil tou nikal hi gaya!', 'Aray aray! Police aa jaye gi!',
+  'Bhai tum rickshaw chalate ho ya tank?', 'Kiraya aadha karo, jaan khatre mein daali hai!', 'Yeh video tou viral hogi!',
+  'Ammi ko bata dun ga tumhari driving ka!', 'Wah ustad, seedha takkar!', 'Bas karo! Meri shaadi agle hafte hai!',
+];
+DRIVER_LINES.sedan = DRIVER_LINES.hatch = DRIVER_LINES.van = DRIVER_LINES.pickup = DRIVER_LINES.car;
+const PESHAWAR_EXTRA = {
+  crash: ['Khair de, wrora!', 'Zra pa aram!', 'Lala, jaan hai ke nahi?!', 'Da sa kawe?! (Kya kar rahe ho?!)'],
+  carHit: ['Wrora, sta gaadi na da, tank da!', 'Khan sahab, police raghla!', 'Pa khair, pa khair!'],
+};
 const LATE_LINES = ['Itni der? Adhe paise lo bas.', 'Mera tou kaam hi nikal gaya...'];
 const PED_LINES = ['Oye! Andha hai kya?!', 'Dekh ke chalao!', 'Footpath pe rickshaw?!', 'Hosh karo bhai!'];
 
@@ -176,10 +213,22 @@ export class Missions {
     }
 
     for (const e of events) {
-      if (e.type === 'crash' && this.job) {
+      if (e.type === 'carHit') {
+        this.takkar = (this.takkar || 0) + 1;
+        this.hitCombo = (this.hitCombo || 0) + 1;
+        this.comboTimer = 4;
+        if (this.hitCombo >= 2) this.hud.toast(`TAKKAR x${this.hitCombo}!`, 'combo');
+        if (this.speechCooldown < 0) {
+          const lines = DRIVER_LINES[e.vtype] || DRIVER_LINES.car;
+          this.say(pick(lines), DRIVER_NAMES[e.vtype] || 'Driver');
+          this.speechCooldown = 3.2;
+          if (this.job) this.queued = { t: 2.2, text: pick(CITY.id === 'peshawar' && chance(0.4) ? PESHAWAR_EXTRA.carHit : CARHIT_PASSENGER) };
+        }
+        if (this.job) this.job.crashes += e.heavy ? 1 : 0.5;
+      } else if (e.type === 'crash' && this.job) {
         this.job.crashes++;
         if (this.speechCooldown < 0) {
-          this.say(pick(CRASH_LINES));
+          this.say(pick(CITY.id === 'peshawar' && chance(0.4) ? PESHAWAR_EXTRA.crash : CRASH_LINES));
           this.speechCooldown = 3;
         }
       } else if (e.type === 'bump' && this.job && e.strength > 0.9 && this.speechCooldown < 0) {
@@ -196,6 +245,18 @@ export class Missions {
         this.say(pick(PED_LINES), 'Rahgeer');
         this.speechCooldown = 3;
       }
+    }
+
+    if (this.queued) {
+      this.queued.t -= dt;
+      if (this.queued.t <= 0) {
+        if (this.job) this.say(this.queued.text);
+        this.queued = null;
+      }
+    }
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) this.hitCombo = 0;
     }
 
     // floating guidance arrow
@@ -240,14 +301,14 @@ export class Missions {
     this.player.passengerSeat.add(p.group);
     this.job = { dest, fare, time: dist / 6.5 + 25, total: dist / 6.5 + 25, crashes: 0, bumps: 0, person: p, from };
     this.destMarker.visible = true;
-    this.say(pick(PICKUP_LINES).replace('{d}', dest.name));
+    this.say(pick(CITY.pickup).replace('{d}', dest.name));
     this.hud.toast(`Sawari: ${dest.name} — Rs ${fare}`, 'good');
     this.spawnWaiting();
   }
 
   currentFare() {
     const j = this.job;
-    let f = j.fare * Math.max(0.3, 1 - j.crashes * 0.15 - j.bumps * 0.03);
+    let f = j.fare * Math.max(0.3, 1 - j.crashes * 0.12 - j.bumps * 0.03);
     if (j.time < 0) f *= 0.5;
     return Math.round(f / 10) * 10;
   }
@@ -260,7 +321,7 @@ export class Missions {
     pay += tip;
     this.money += pay;
     this.rides++;
-    const stars = clamp(5 - j.crashes - (j.time < 0 ? 1.5 : 0) - Math.min(2, (this.ratingPenalty || 0)), 1, 5);
+    const stars = clamp(5 - Math.round(j.crashes) - (j.time < 0 ? 1.5 : 0) - Math.min(2, (this.ratingPenalty || 0)), 1, 5);
     this.ratingPenalty = 0;
     this.ratings.push(stars);
     this.player.passengerSeat.remove(j.person.group);
@@ -270,7 +331,7 @@ export class Missions {
     p.group.position.set(j.dest.x, CURB_H, j.dest.z);
     this.scene.add(p.group);
     setTimeout(() => this.scene.remove(p.group), 6000);
-    this.say(j.time < 0 ? pick(LATE_LINES) : pick(PAY_LINES));
+    this.say(j.time < 0 ? pick(LATE_LINES) : pick(CITY.pay));
     this.hud.toast(`+ Rs ${pay}${tip ? ` (incl. Rs ${tip} tip)` : ''}  ${'★'.repeat(Math.round(stars))}${'☆'.repeat(5 - Math.round(stars))}`, 'money');
     this.sound.coins();
     this.job = null;

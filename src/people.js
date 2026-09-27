@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { Builder, mat4, col } from './builder.js';
 import { rnd, rand, pick, chance, clamp, damp } from './util.js';
 import { WALK_W, CURB_H } from './config.js';
+import { CITY } from './cities.js';
 
 const SKIN = ['#8d5b3e', '#a06a48', '#b07a55', '#c28d66', '#7a4e33', '#d1a07a'];
 const MEN_KAMEEZ = ['#f2f0e8', '#e8e2d0', '#cfc6b0', '#9aa4ad', '#6b7a8a', '#4b5563', '#8a6d4d', '#dcd3bf', '#3d4f6b', '#556b4f', '#1f2937', '#b4c7d9'];
@@ -20,17 +21,23 @@ const G = {
 export const personMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
 
 export function randomLook(forceMale = false) {
-  const female = !forceMale && chance(0.28);
+  const P = CITY.people;
+  const female = !forceMale && chance(P.female);
+  const hat = female ? null : chance(P.pakol) ? 'pakol' : chance(P.turban) ? 'turban' : chance(P.cap) ? 'cap' : null;
+  const burqa = female && chance(P.burqa);
   return {
+    hat,
+    waistcoat: !female && chance(P.waistcoat) ? pick(['#2b2b2b', '#3e3a36', '#4a3b2c', '#1f2a3a', '#5a4a3a']) : null,
+    chadar: !female && chance(P.chadar) ? pick(['#8a7a62', '#6b5a48', '#9a8c74', '#4a4038', '#a89880']) : null,
+    burqaCol: burqa && chance(P.blueBurqa) ? '#5d88c4' : '#151515',
     female,
     skin: pick(SKIN),
     shirt: female ? pick(WOMEN_KAMEEZ) : pick(MEN_KAMEEZ),
     pants: female ? pick(['#f5f5f5', '#212121', '#e0d7c6', '#c2185b', '#37474f']) : pick(['#f2f0e8', '#e8e2d0', '#cfc6b0', '#2b2b2b', '#5d6570']),
     dupatta: pick(['#f8bbd0', '#fff59d', '#b2dfdb', '#ffffff', '#ce93d8', '#ffab91', '#212121']),
     hair: pick(HAIR),
-    cap: !female && chance(0.25),
-    beard: !female && chance(0.45),
-    burqa: female && chance(0.25),
+    beard: !female && chance(CITY.id === 'peshawar' ? 0.65 : 0.45),
+    burqa,
     shoe: pick(['#3e2723', '#212121', '#5d4037', '#8d6e63']),
     scale: female ? rand(0.9, 0.97) : rand(0.95, 1.06),
   };
@@ -44,8 +51,8 @@ export function personGeometries(look) {
     const g = b.build({ p: personMaterial }).children[0].geometry;
     return g;
   };
-  const shirt = col(look.burqa ? '#151515' : look.shirt);
-  const pants = col(look.burqa ? '#151515' : look.pants);
+  const shirt = col(look.burqa ? look.burqaCol : look.shirt);
+  const pants = col(look.burqa ? look.burqaCol : look.pants);
   const skin = col(look.skin);
   const torso = mk((b) => {
     // long kameez
@@ -56,13 +63,25 @@ export function personGeometries(look) {
     b.geom('p', G.sph, mat4(0, 1.62, 0.01, 0, 0.1, 0.12, 0.11), skin); // head
     b.geom('p', G.sph, mat4(0, 1.61, 0.105, 0, 0.018, 0.025, 0.02), skin); // nose
     if (look.female) {
-      const d = col(look.burqa ? '#151515' : look.dupatta);
+      const d = col(look.burqa ? look.burqaCol : look.dupatta);
       b.geom('p', G.sph, mat4(0, 1.65, -0.01, 0, 0.125, 0.14, 0.13), d);
       b.geom('p', G.box, mat4(0, 1.3, -0.06, 0, 0.44, 0.35, 0.2), d);
-      if (look.burqa) b.geom('p', G.box, mat4(0, 1.58, 0.1, 0, 0.12, 0.06, 0.02), col('#0d0d0d'));
+      if (look.burqa) b.geom('p', G.box, mat4(0, 1.6, 0.115, 0, 0.12, 0.06, 0.02), col(look.burqaCol === '#151515' ? '#0d0d0d' : '#3d5f8c'));
     } else {
       b.geom('p', G.sph, mat4(0, 1.68, -0.015, 0, 0.105, 0.08, 0.11), col(look.hair));
-      if (look.cap) b.geom('p', G.cyl, mat4(0, 1.73, -0.005, 0, 0.1, 0.07, 0.105), col('#f5f5f5'));
+      if (look.hat === 'cap') b.geom('p', G.cyl, mat4(0, 1.73, -0.005, 0, 0.1, 0.07, 0.105), col('#f5f5f5'));
+      if (look.hat === 'pakol') {
+        const pc = col(pick(['#8a7a62', '#6b5d4c', '#5a5048', '#9c8a70', '#3c3a38']));
+        b.geom('p', G.cyl, mat4(0, 1.73, -0.01, 0, 0.118, 0.1, 0.125), pc);
+        b.geom('p', G.sph, mat4(0, 1.785, -0.01, 0, 0.13, 0.045, 0.135), pc);
+      }
+      if (look.hat === 'turban') {
+        const tc = col(pick(['#f5f5f0', '#f5f5f0', '#1a1a1a', '#e8e0cc', '#7a8aa0']));
+        b.geom('p', G.sph, mat4(0, 1.72, -0.01, 0, 0.14, 0.1, 0.145), tc);
+        b.geom('p', G.box, mat4(0.02, 1.6, -0.14, 0, 0.08, 0.3, 0.02), tc);
+      }
+      if (look.waistcoat) b.geom('p', G.cone, mat4(0, 1.18, 0, 0, 0.245, 0.48, 0.18), col(look.waistcoat));
+      if (look.chadar) b.geom('p', G.box, mat4(0, 1.3, -0.02, 0, 0.5, 0.32, 0.3), col(look.chadar));
       if (look.beard) b.geom('p', G.sph, mat4(0, 1.55, 0.05, 0, 0.085, 0.07, 0.07), col(look.hair));
     }
   });
@@ -164,6 +183,17 @@ export function addStaticPerson(b, x, y, z, yaw, look = randomLook(), pose = 'st
   const s = look.scale;
   const base = mat4(x, y, z, yaw, s, s, s);
   const at = (geo, px, py, pz, rx = 0, rz = 0) => b.geom('p', geo, base.clone().multiply(mat4(px, py, pz, 0, 1, 1, 1, rx, rz)));
+  if (pose === 'sit') {
+    // sitting on a charpai / bench; y is the seat height
+    at(g.torso, 0, -0.9, 0);
+    for (const sd of [-1, 1]) {
+      at(g.thigh, sd * 0.1, 0.02, 0, -1.45);
+      at(g.shin, sd * 0.1, 0.0, 0.46, 0.15);
+    }
+    at(g.arm, -0.25, 0.52, 0, -0.7, -0.1);
+    at(g.arm, 0.25, 0.52, 0, chance(0.5) ? -1.3 : -0.4, 0.1);
+    return;
+  }
   if (pose === 'squat') {
     at(g.torso, 0, -0.42, 0);
     for (const sd of [-1, 1]) {
@@ -245,6 +275,7 @@ export class Pedestrians {
   buildCrowds(scene, city) {
     const b = new Builder();
     for (const v of city.vendorSpots) addStaticPerson(b, v.x, CURB_H, v.z, v.yaw, randomLook(true));
+    for (const st of city.dhabaSeats) addStaticPerson(b, st.x, st.h, st.z, st.yaw, randomLook(true), 'sit');
     // people loitering at shop fronts, sitting on their haunches, chatting in small groups
     for (let n = 0; n < 110; n++) {
       const spot = city.randomCurbSpot();
@@ -261,7 +292,6 @@ export class Pedestrians {
     }
     const g = b.build({ p: personMaterial });
     scene.add(g);
-    city.grid.clear();
     city.indexColliders();
   }
 

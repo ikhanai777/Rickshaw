@@ -180,10 +180,10 @@ export function plasterTexture() {
   ctx.fillRect(0, 0, S, S);
   blotches(ctx, S, S, 40, 20, 110, '150,140,125', 0.1, 0.25);
   // rain streaks
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 18; i++) {
     const x = rnd() * S;
     const g = ctx.createLinearGradient(0, 0, 0, S);
-    g.addColorStop(0, 'rgba(90,85,75,0.25)');
+    g.addColorStop(0, 'rgba(90,85,75,0.1)');
     g.addColorStop(1, 'rgba(90,85,75,0)');
     ctx.fillStyle = g;
     ctx.fillRect(x, 0, rand(2, 10), rand(80, S));
@@ -293,7 +293,7 @@ export function facadeTexture(style) {
   const [e, ectx] = makeCanvas(S, S);
   ectx.fillStyle = '#000';
   ectx.fillRect(0, 0, S, S);
-  ctx.fillStyle = style === 2 ? '#e2d6c2' : '#ece8df';
+  ctx.fillStyle = style >= 2 ? '#e2d6c2' : '#ece8df';
   ctx.fillRect(0, 0, S, S);
   blotches(ctx, S, S, 50, 30, 140, '150,138,120', 0.08, 0.22);
 
@@ -372,6 +372,66 @@ export function facadeTexture(style) {
         sg.addColorStop(1, 'rgba(70,65,55,0)');
         ctx.fillStyle = sg;
         ctx.fillRect(wx + rand(0, 150), wy + wh, rand(10, 40), 60);
+      } else if (style === 3) {
+        // Peshawari carved wooden jharoka with jaali lattice
+        const wx = x0 + 34;
+        const wy = y0 + 34;
+        const ww = 188;
+        const wh = 196;
+        const wood = pick(['#5b3a22', '#4a2f1b', '#6b4428', '#3e2a1c']);
+        ctx.fillStyle = wood;
+        ctx.fillRect(wx, wy, ww, wh);
+        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(wx + 6, wy + 6, ww - 12, wh - 12);
+        // carved top arch band
+        ctx.fillStyle = 'rgba(255,220,170,0.18)';
+        for (let k = 0; k < 9; k++) {
+          ctx.beginPath();
+          ctx.arc(wx + 14 + k * 20, wy + 16, 8, Math.PI, 0);
+          ctx.fill();
+        }
+        const lx = wx + 18;
+        const ly = wy + 34;
+        const lw = ww - 36;
+        const lh = wh - 60;
+        const open = chance(0.35);
+        if (open) drawWindowGlass(ctx, lx, ly, lw, lh);
+        else {
+          ctx.fillStyle = '#1e140c';
+          ctx.fillRect(lx, ly, lw, lh);
+        }
+        if (lit) {
+          const g = ectx.createLinearGradient(0, ly, 0, ly + lh);
+          g.addColorStop(0, 'rgb(255,180,90)');
+          g.addColorStop(1, 'rgb(190,100,40)');
+          ectx.fillStyle = g;
+          ectx.fillRect(lx, ly, lw, lh);
+        }
+        // jaali: diagonal lattice drawn on both maps so light shines through the holes
+        for (const [cx2, col2] of [[ctx, wood], [ectx, '#000']]) {
+          cx2.save();
+          cx2.beginPath();
+          cx2.rect(lx, ly, lw, lh);
+          cx2.clip();
+          cx2.strokeStyle = col2;
+          cx2.lineWidth = open ? 3 : 5;
+          for (let k = -lh; k < lw + lh; k += 16) {
+            cx2.beginPath();
+            cx2.moveTo(lx + k, ly);
+            cx2.lineTo(lx + k + lh, ly + lh);
+            cx2.moveTo(lx + k, ly + lh);
+            cx2.lineTo(lx + k + lh, ly);
+            cx2.stroke();
+          }
+          cx2.restore();
+        }
+        // carved bottom panel and brackets
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(wx + 10, wy + wh - 22, ww - 20, 14);
+        ctx.fillStyle = wood;
+        ctx.fillRect(wx - 8, wy + wh, 16, 18);
+        ctx.fillRect(wx + ww - 8, wy + wh, 16, 18);
       } else {
         const wx = x0 + 68;
         const wy = y0 + 50;
@@ -456,15 +516,34 @@ export function shopTexture(variant) {
     if (kind !== 'closed') {
       ctx.fillStyle = '#2a2520';
       ctx.fillRect(x, y, w, h);
-      // shelves stuffed with goods
-      for (let s = 0; s < 5; s++) {
-        const sy = y + 20 + s * 42;
-        ctx.fillStyle = '#5b4632';
-        ctx.fillRect(x + 4, sy + 30, w - 8, 5);
-        for (let k = 0; k < 14; k++) {
-          ctx.fillStyle = `hsl(${randInt(0, 360)},${randInt(40, 85)}%,${randInt(30, 65)}%)`;
-          const gw = rand(8, 16);
-          ctx.fillRect(x + 6 + k * ((w - 12) / 14), sy + 30 - rand(12, 26), gw, 30);
+      // shelves stuffed with goods: boxes, bottles and packets with a bit of shading
+      const lg = ctx.createLinearGradient(0, y, 0, y + h);
+      lg.addColorStop(0, '#4a4036');
+      lg.addColorStop(1, '#1e1a16');
+      ctx.fillStyle = lg;
+      ctx.fillRect(x, y, w, h);
+      for (let sh = 0; sh < 6; sh++) {
+        const sy = y + 16 + sh * 34;
+        ctx.fillStyle = '#6b5238';
+        ctx.fillRect(x + 4, sy + 26, w - 8, 4);
+        let gx = x + 6;
+        while (gx < x + w - 10) {
+          const gw = rand(5, 11);
+          const gh = rand(10, 24);
+          const hue = pick([0, 10, 30, 45, 120, 200, 220, 280, 340]) + randInt(-10, 10);
+          const bottle = chance(0.3);
+          const g2 = ctx.createLinearGradient(gx, 0, gx + gw, 0);
+          g2.addColorStop(0, `hsl(${hue},${randInt(35, 65)}%,${randInt(28, 40)}%)`);
+          g2.addColorStop(0.4, `hsl(${hue},${randInt(35, 65)}%,${randInt(45, 60)}%)`);
+          g2.addColorStop(1, `hsl(${hue},${randInt(35, 65)}%,${randInt(22, 32)}%)`);
+          ctx.fillStyle = g2;
+          if (bottle) {
+            ctx.fillRect(gx + gw * 0.3, sy + 26 - gh - 4, gw * 0.4, 5);
+            ctx.fillRect(gx, sy + 26 - gh, gw, gh);
+          } else ctx.fillRect(gx, sy + 26 - gh, gw, gh);
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          ctx.fillRect(gx + 1, sy + 26 - gh * 0.6, gw - 2, 2);
+          gx += gw + rand(0.5, 2.5);
         }
       }
       // counter
@@ -585,44 +664,9 @@ export function blotchTexture() {
 
 // ------------------------------------------------------------------ signs ---
 
-const SIGNS = [
-  ['جنرل اسٹور', 'GENERAL STORE'],
-  ['حلوہ پوری', 'HALWA PURI'],
-  ['موبائل شاپ', 'MOBILE ZONE'],
-  ['میڈیکل اسٹور', 'MEDICAL STORE'],
-  ['کریانہ اسٹور', 'KARYANA STORE'],
-  ['ٹیلر ماسٹر', 'TAILOR MASTER'],
-  ['چائے خانہ', 'CHAI KHANA'],
-  ['بیکری اینڈ سویٹس', 'BAKERS & SWEETS'],
-  ['نان شاپ', 'TANDOOR'],
-  ['بریانی سینٹر', 'BIRYANI CENTRE'],
-  ['الہ دین ہیئر کٹنگ', 'HAIR SALOON'],
-  ['بسم اللہ ہوٹل', 'BISMILLAH HOTEL'],
-  ['مدینہ کلاتھ ہاؤس', 'CLOTH HOUSE'],
-  ['فوٹو اسٹیٹ', 'PHOTOSTAT'],
-  ['ایزی لوڈ', 'EASYLOAD'],
-  ['پان شاپ', 'PAAN SHOP'],
-  ['لاہوری نہاری', 'NIHARI HOUSE'],
-  ['سجی اینڈ کڑاہی', 'KARAHI POINT'],
-  ['الیکٹرک اسٹور', 'ELECTRIC STORE'],
-  ['آٹو پارٹس', 'AUTO PARTS'],
-  ['جوس کارنر', 'JUICE CORNER'],
-  ['کتاب گھر', 'BOOK DEPOT'],
-  ['ہارڈویئر', 'HARDWARE'],
-  ['شوز سینٹر', 'SHOES CENTRE'],
-  ['ڈاکٹر کلینک', 'CLINIC'],
-  ['جیولرز', 'JEWELLERS'],
-  ['دودھ دہی', 'MILK SHOP'],
-  ['سموسہ پکوڑا', 'SAMOSA PAKORA'],
-  ['پراپرٹی ایڈوائزر', 'ESTATE AGENT'],
-  ['آپٹیکل', 'OPTICS'],
-  ['کمپیوٹر سینٹر', 'COMPUTERS'],
-  ['قصاب', 'MUTTON SHOP'],
-];
+export const SIGN_COUNT = 32;
 
-export const SIGN_COUNT = SIGNS.length;
-
-export function signAtlas() {
+export function signAtlas(SIGNS) {
   const W = 2048;
   const H = 2048;
   const [c, ctx] = makeCanvas(W, H);
@@ -822,4 +866,226 @@ export function beamTexture() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 16, 256);
   return toTexture(c, { repeat: false });
+}
+
+// ------------------------------------------------------------- normal maps ---
+
+// Builds a tangent-space normal map from the brightness of a painted texture.
+export function normalMapFrom(tex, strength = 2, scale = 1) {
+  const src = tex.image;
+  const W = Math.max(64, Math.round(src.width * scale));
+  const H = Math.max(64, Math.round(src.height * scale));
+  const [c, ctx] = makeCanvas(W, H);
+  ctx.drawImage(src, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H);
+  const px = d.data;
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) lum[i] = (px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11) / 255;
+  for (let y = 0; y < H; y++) {
+    const yu = ((y - 1 + H) % H) * W;
+    const yd = ((y + 1) % H) * W;
+    const yc = y * W;
+    for (let x = 0; x < W; x++) {
+      const xl = (x - 1 + W) % W;
+      const xr = (x + 1) % W;
+      const dx = (lum[yc + xr] - lum[yc + xl]) * strength;
+      const dy = (lum[yd + x] - lum[yu + x]) * strength;
+      const inv = 1 / Math.sqrt(dx * dx + dy * dy + 1);
+      const o = (yc + x) * 4;
+      px[o] = (-dx * inv * 0.5 + 0.5) * 255;
+      px[o + 1] = (dy * inv * 0.5 + 0.5) * 255;
+      px[o + 2] = (inv * 0.5 + 0.5) * 255;
+      px[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(d, 0, 0);
+  const t = toTexture(c, { srgb: false });
+  t.wrapS = tex.wrapS;
+  t.wrapT = tex.wrapT;
+  return t;
+}
+
+// Wooden jaali lattice for Peshawari balconies
+export function latticeTexture() {
+  const S = 256;
+  const [c, ctx] = makeCanvas(S, S);
+  ctx.fillStyle = '#1a120b';
+  ctx.fillRect(0, 0, S, S);
+  ctx.strokeStyle = '#8a5e3a';
+  ctx.lineWidth = 7;
+  for (let k = -S; k < S * 2; k += 32) {
+    ctx.beginPath();
+    ctx.moveTo(k, 0);
+    ctx.lineTo(k + S, S);
+    ctx.moveTo(k, S);
+    ctx.lineTo(k + S, 0);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#6b4428';
+  ctx.lineWidth = 16;
+  ctx.strokeRect(0, 0, S, S);
+  grain(ctx, S, S, 22);
+  return toTexture(c);
+}
+
+export function clockFaceTexture() {
+  const S = 256;
+  const [c, ctx] = makeCanvas(S, S);
+  ctx.fillStyle = '#7a3b22';
+  ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = '#f3ecd8';
+  ctx.beginPath();
+  ctx.arc(S / 2, S / 2, 110, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.fillStyle = '#222';
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI * 2;
+    ctx.fillRect(S / 2 + Math.cos(a) * 92 - 4, S / 2 + Math.sin(a) * 92 - 4, 8, 8);
+  }
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(S / 2, S / 2);
+  ctx.lineTo(S / 2 + 45, S / 2 - 30);
+  ctx.stroke();
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(S / 2, S / 2);
+  ctx.lineTo(S / 2 - 20, S / 2 - 80);
+  ctx.stroke();
+  return toTexture(c, { repeat: false });
+}
+
+export function pakFlagTexture() {
+  const [c, ctx] = makeCanvas(300, 200);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 75, 200);
+  ctx.fillStyle = '#01411c';
+  ctx.fillRect(75, 0, 225, 200);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(190, 100, 62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#01411c';
+  ctx.beginPath();
+  ctx.arc(210, 86, 56, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 - 0.6;
+    const r = i % 2 ? 9 : 22;
+    const x = 222 + Math.cos(a) * r;
+    const y = 72 + Math.sin(a) * r;
+    if (i) ctx.lineTo(x, y);
+    else ctx.moveTo(x, y);
+  }
+  ctx.fill();
+  return toTexture(c, { repeat: false });
+}
+
+// Soft dark gradient: contact shadows under vehicles and grime at wall bases
+export function contactShadowTexture() {
+  const [c, ctx] = makeCanvas(128, 128);
+  const g = ctx.createRadialGradient(64, 64, 8, 64, 64, 64);
+  g.addColorStop(0, 'rgba(0,0,0,0.75)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.45)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  return toTexture(c, { repeat: false });
+}
+
+export function aoStripTexture() {
+  const [c, ctx] = makeCanvas(16, 64);
+  const g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0, 'rgba(0,0,0,0.55)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 16, 64);
+  return toTexture(c, { repeat: false });
+}
+
+// Pakistani truck art used on the taj (crown) of jingle trucks
+export function tajArtTexture(text = 'ماشاءاللہ', bg = '#8b0000') {
+  const W = 512;
+  const H = 320;
+  const [c, ctx] = makeCanvas(W, H);
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, shade(bg, 40));
+  g.addColorStop(1, shade(bg, -30));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // sun-burst rays
+  for (let k = 0; k < 24; k++) {
+    const a = Math.PI + (k / 23) * Math.PI;
+    ctx.strokeStyle = k % 2 ? 'rgba(255,215,0,0.55)' : 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, H * 0.95);
+    ctx.lineTo(W / 2 + Math.cos(a) * W, H * 0.95 + Math.sin(a) * W);
+    ctx.stroke();
+  }
+  artBorder(ctx, 0, 0, W, H, 26);
+  for (let i = 0; i < 6; i++) flower(ctx, 50 + i * 82, H - 60, 26, 8, pick(['#ff3b3b', '#ffd700', '#ffffff', '#39d353', '#ff7ab8']), '#1a1a1a');
+  // peacock-eye medallions
+  for (const x of [80, W - 80]) {
+    ctx.fillStyle = '#0b3d91';
+    ctx.beginPath();
+    ctx.ellipse(x, 110, 44, 60, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2ecc71';
+    ctx.beginPath();
+    ctx.ellipse(x, 110, 28, 40, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.ellipse(x, 110, 12, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 7;
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold 64px ${URDU_FONT}`;
+  ctx.strokeText(text, W / 2, 118, W - 220);
+  ctx.fillText(text, W / 2, 118, W - 220);
+  grain(ctx, W, H, 12);
+  return toTexture(c, { repeat: false });
+}
+
+// Clusters of leaves on a transparent background for alpha-tested tree canopies
+export function leafTexture() {
+  const S = 512;
+  const [c, ctx] = makeCanvas(S, S);
+  ctx.clearRect(0, 0, S, S);
+  for (let i = 0; i < 1400; i++) {
+    const a = rnd() * Math.PI * 2;
+    const r = Math.sqrt(rnd()) * S * 0.47;
+    const x = S / 2 + Math.cos(a) * r;
+    const y = S / 2 + Math.sin(a) * r * 0.9;
+    const shade = 0.55 + rnd() * 0.45 - (r / S) * 0.2;
+    const g = Math.round(110 * shade + 40);
+    ctx.fillStyle = `rgb(${Math.round(g * 0.55)},${g},${Math.round(g * 0.35)})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rand(5, 11), rand(2.5, 5), rnd() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // a few twigs
+  ctx.strokeStyle = 'rgba(70,50,30,0.8)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 12; i++) {
+    ctx.beginPath();
+    ctx.moveTo(S / 2, S / 2);
+    const a = rnd() * Math.PI * 2;
+    ctx.lineTo(S / 2 + Math.cos(a) * S * 0.35, S / 2 + Math.sin(a) * S * 0.35);
+    ctx.stroke();
+  }
+  const t = toTexture(c, { repeat: false });
+  return t;
 }

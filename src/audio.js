@@ -148,12 +148,12 @@ export class Sound {
   }
 
   // distant traffic horn, volume by distance
-  honk(dist, big = false) {
+  honk(dist, big = false, angry = false) {
     if (!this.ctx || dist > 120) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const vol = Math.min(0.2, 6 / (dist + 8)) * (big ? 1.3 : 1);
-    const beeps = 1 + Math.floor(Math.random() * 3);
+    const beeps = angry ? 3 + Math.floor(Math.random() * 3) : 1 + Math.floor(Math.random() * 3);
     const base = big ? 220 + Math.random() * 60 : 330 + Math.random() * 240;
     for (let k = 0; k < beeps; k++) {
       const st = t + k * 0.22;
@@ -239,5 +239,223 @@ export class Sound {
       o.start(t + k * 0.09);
       o.stop(t + k * 0.09 + 0.45);
     });
+  }
+
+  // Crunch of metal and a tinkle of glass when you ram something
+  crunch(strength = 1, dist = 0) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const vol = Math.min(1, 8 / (dist + 8)) * (0.35 + strength * 0.5);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 900 + Math.random() * 600;
+    bp.Q.value = 0.7;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    src.connect(bp).connect(g).connect(this.master);
+    src.start(t, Math.random());
+    src.stop(t + 0.5);
+    for (let k = 0; k < 3; k++) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(90 + Math.random() * 160, t);
+      o.frequency.exponentialRampToValueAtTime(40, t + 0.3);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(vol * 0.25, t);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      o.connect(og).connect(this.master);
+      o.start(t);
+      o.stop(t + 0.32);
+    }
+    if (strength > 0.35) {
+      for (let k = 0; k < 7; k++) {
+        const st = t + 0.03 + Math.random() * 0.25;
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = 2500 + Math.random() * 4000;
+        const og = ctx.createGain();
+        og.gain.setValueAtTime(vol * 0.12, st);
+        og.gain.exponentialRampToValueAtTime(0.001, st + 0.12);
+        o.connect(og).connect(this.master);
+        o.start(st);
+        o.stop(st + 0.14);
+      }
+    }
+  }
+
+  // Jingle-truck pressure horn that plays a little tune
+  musicalHorn(dist) {
+    if (!this.ctx || dist > 140) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const vol = Math.min(0.22, 9 / (dist + 10));
+    const tunes = [[523, 659, 784, 659, 523], [392, 523, 659, 784], [659, 587, 523, 587, 659, 659]];
+    const tune = tunes[Math.floor(Math.random() * tunes.length)];
+    tune.forEach((f, k) => {
+      const st = t + k * 0.16;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, st);
+      g.gain.linearRampToValueAtTime(vol, st + 0.02);
+      g.gain.setValueAtTime(vol, st + 0.12);
+      g.gain.linearRampToValueAtTime(0, st + 0.15);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f * 2;
+      bp.Q.value = 1.2;
+      for (const m of [1, 1.5]) {
+        const o = ctx.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.value = f * m * 0.5;
+        o.connect(bp);
+        o.start(st);
+        o.stop(st + 0.16);
+      }
+      bp.connect(g).connect(this.master);
+    });
+  }
+
+  // ----------------------------------------------------------------- radio
+
+  radioOn(scale = 'yaman') {
+    if (!this.ctx || this.radio) return;
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.value = 0;
+    out.gain.setTargetAtTime(0.5, ctx.currentTime, 0.3);
+    // transistor-radio band limiting
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 140;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 4200;
+    out.connect(hp).connect(lp).connect(this.master);
+    // tanpura drone on Sa and Pa
+    const sa = scale === 'pahari' ? 146.83 : 138.59;
+    const drone = ctx.createGain();
+    drone.gain.value = 0.035;
+    const df = ctx.createBiquadFilter();
+    df.type = 'lowpass';
+    df.frequency.value = 900;
+    const dro = [];
+    for (const f of [sa, sa * 1.5, sa * 2, sa * 1.003]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      o.connect(df);
+      o.start();
+      dro.push(o);
+    }
+    df.connect(drone).connect(out);
+    const degrees = scale === 'pahari' ? [0, 2, 4, 5, 7, 9, 10, 12, 14] : [0, 2, 4, 6, 7, 9, 11, 12, 14];
+    const phrase = [];
+    let idx = 4;
+    for (let k = 0; k < 16; k++) {
+      idx = Math.max(0, Math.min(degrees.length - 1, idx + Math.round((Math.random() - 0.5) * 3)));
+      phrase.push(Math.random() < 0.72 ? idx : -1);
+    }
+    const r = { out, dro, step: 0, next: ctx.currentTime + 0.1, phrase, degrees, sa: sa * 2, scale, bar: 0 };
+    const bpm = scale === 'pahari' ? 112 : 92;
+    const stepDur = 60 / bpm / 2;
+    // keherwa: dha ge na ti | na ka dhi na
+    const bayan = [1, 0.6, 0, 0, 0, 0, 0.8, 0];
+    const dayan = [0.8, 0, 1, 0.6, 1, 0.5, 0.8, 1];
+    r.timer = setInterval(() => {
+      while (r.next < ctx.currentTime + 0.25) {
+        const st = r.next;
+        const k = r.step % 8;
+        if (bayan[k]) this.drum(out, st, 'bayan', bayan[k]);
+        if (dayan[k]) this.drum(out, st, k === 5 ? 'ka' : 'na', dayan[k]);
+        const deg = r.phrase[r.step % 16];
+        if (deg >= 0) this.note(out, st, r.sa * Math.pow(2, r.degrees[deg] / 12), stepDur * (Math.random() < 0.3 ? 2 : 1), scale);
+        r.step++;
+        if (r.step % 64 === 0) {
+          // vary the phrase every few bars so it does not loop forever
+          for (let j = 0; j < 4; j++) r.phrase[Math.floor(Math.random() * 16)] = Math.random() < 0.7 ? Math.floor(Math.random() * r.degrees.length) : -1;
+        }
+        r.next += stepDur;
+      }
+    }, 50);
+    this.radio = r;
+  }
+
+  radioOff() {
+    if (!this.radio) return;
+    const r = this.radio;
+    clearInterval(r.timer);
+    r.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+    for (const o of r.dro) o.stop(this.ctx.currentTime + 0.5);
+    this.radio = null;
+  }
+
+  drum(out, t, kind, v) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    if (kind === 'bayan') {
+      o.type = 'sine';
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(58, t + 0.25);
+      g.gain.setValueAtTime(0.5 * v, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    } else if (kind === 'na') {
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(760, t);
+      o.frequency.exponentialRampToValueAtTime(700, t + 0.1);
+      g.gain.setValueAtTime(0.18 * v, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    } else {
+      o.type = 'square';
+      o.frequency.setValueAtTime(320, t);
+      g.gain.setValueAtTime(0.06 * v, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    }
+    o.connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 0.45);
+  }
+
+  note(out, t, f, dur, scale) {
+    const ctx = this.ctx;
+    const g = ctx.createGain();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    if (scale === 'pahari') {
+      // rabab: bright pluck that dies away
+      lp.frequency.setValueAtTime(4000, t);
+      lp.frequency.exponentialRampToValueAtTime(700, t + 0.3);
+      g.gain.setValueAtTime(0.16, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + Math.max(0.35, dur * 1.8));
+    } else {
+      // harmonium: reedy, sustained
+      lp.frequency.value = 1900;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.07, t + 0.04);
+      g.gain.setValueAtTime(0.07, t + dur * 0.9);
+      g.gain.linearRampToValueAtTime(0, t + dur * 1.05);
+    }
+    const oscs = scale === 'pahari' ? [['sawtooth', 1], ['square', 2.002]] : [['sawtooth', 1], ['sawtooth', 1.004], ['square', 0.5]];
+    for (const [type, m] of oscs) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f * m;
+      if (scale !== 'pahari') {
+        const vib = ctx.createOscillator();
+        const vg = ctx.createGain();
+        vib.frequency.value = 5.5;
+        vg.gain.value = f * 0.006;
+        vib.connect(vg).connect(o.frequency);
+        vib.start(t);
+        vib.stop(t + dur * 1.1 + 0.05);
+      }
+      o.connect(lp);
+      o.start(t);
+      o.stop(t + Math.max(0.4, dur * 1.9));
+    }
+    lp.connect(g).connect(out);
   }
 }

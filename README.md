@@ -1,6 +1,6 @@
 # Rickshaw Wala — رکشہ والا
 
-A 3D auto-rickshaw driving game set in the streets of Lahore, built with [three.js](https://threejs.org/).
+A 3D auto-rickshaw driving game set in the streets of **Lahore** and **Peshawar**, built with [three.js](https://threejs.org/).
 Everything — the city, vehicles, people, textures and sound — is generated procedurally in the browser,
 so there are no asset downloads beyond three.js and two Google Fonts.
 
@@ -26,12 +26,19 @@ Then open <http://localhost:8080>. (Opening the file directly via `file://` won'
 | `C` | Camera: chase / driver's seat / high |
 | `T` | Time of day: afternoon / golden hour / night / smoggy morning |
 | `R` | Put the rickshaw back on the road |
+| `Y` | Radio on / off |
 | `M` | Mute |
 | `P` / `Esc` | Pause |
 
 On phones and tablets, on-screen buttons appear once you start.
 
 ## Gameplay
+
+- Pick your **city** (Lahore or Peshawar), your **rickshaw paint** and a **graphics level** on the main menu.
+  Your savings are kept per city in the browser.
+- **Ram anything, GTA-style.** Hit a car and it gets shoved and spun out of your way. Bikes (and speeding
+  rickshaws) tip over, and your rickshaw keeps rolling. Buses and jingle trucks are heavy, so they stop you instead.
+  Every driver has something to say about it, and so does your passenger.
 
 - **Sawari (passengers)** wave from the footpath and are marked with green rings and a green arrow on the minimap.
   Stop next to one to pick them up.
@@ -42,6 +49,16 @@ On phones and tablets, on-screen buttons appear once you start.
 - The rickshaw runs on **CNG**. When the tank runs low, refuel at the CNG station (the blue dot on the minimap)
   by stopping under the canopy.
 
+## Lahore and Peshawar
+
+| | Lahore | Peshawar |
+| --- | --- | --- |
+| Landmarks | Minar-e-Pakistan, Badshahi-style mosque, Anarkali & Liberty bazaars, Gawalmandi food street | Ghanta Ghar clock tower, Bala Hisar fort, Mahabat Khan-style mosque, Qissa Khwani & Namak Mandi bazaars, Chapli Kabab street |
+| Streets | Plastered shop-houses, arched old-city facades | Carved wooden jharokas, earthy brick, Khyber hills on the horizon |
+| Traffic | Corollas, Mehrans, CD70s, donkey carts | More jingle trucks, Datsun pickups and horse-drawn tongas |
+| People | Prayer caps, dupattas | Pakol caps, turbans, waistcoats, chadars, shuttlecock burqas |
+| Radio | Harmonium over tabla keherwa | Rabab over tabla |
+
 ## What's in the city
 
 - Dense shop-houses with rolling shutters, Urdu/English panaflex signboards, awnings, balconies with laundry,
@@ -51,10 +68,14 @@ On phones and tablets, on-screen buttons appear once you start.
 - Minar-e-Pakistan in a park, a Mughal-style red-sandstone mosque, a CNG station, and bazaars
   strung with green-and-white flag bunting
 - Left-hand traffic: Corolla-style sedans, Mehran-style hatchbacks, Bolan vans, Ravi pickups,
-  truck-art buses, CD70 motorbikes (often carrying a pillion rider) and other rickshaws.
+  truck-art buses, CD70 motorbikes (often carrying a pillion rider), other rickshaws, tongas, donkey carts and
+  **jingle trucks** with a painted taj crown, chains of pendants, chasing coloured bulbs and musical horns.
   They turn at the *chowks*, swerve around anything stopped in their lane, and use the horn a lot.
 - Pedestrians in shalwar kameez, dupattas and burqas who jump out of your way, plus fruit-cart vendors
-- Kites and cheel birds overhead, dust in the air, and four lighting presets including a sodium-lit night
+- Chai dhabas with charpais and customers, cows and goats on the footpaths, and vendors calling out
+  ("Garam garam samosay!", "Chapli kabab, taaza taaza!")
+- Kites and cheel birds overhead, drifting clouds, two-stroke exhaust smoke, sparks and dust on impacts,
+  bloom and colour grading, and four lighting presets including a sodium-lit night
 
 ## Code layout
 
@@ -72,3 +93,11 @@ On phones and tablets, on-screen buttons appear once you start.
 | `src/audio.js` | WebAudio synthesis for the engine, horns and effects |
 | `src/textures.js` | Canvas-painted textures: asphalt, facades, shopfronts, signs, truck art |
 | `src/builder.js` | Geometry batching into per-chunk merged meshes |
+| `src/cities.js` | Per-city data: localities, landmarks, signboards, traffic mix, people, dialogue |
+| `src/effects.js` | Particles and the post-processing chain (bloom, grade, speed blur) |
+
+## Graphics levels
+
+- **High**: 2048 shadow maps, MSAA, bloom and colour grading. For desktops.
+- **Medium**: 1024 shadow maps, bloom and grading, lower resolution. Default on phones and tablets.
+- **Low**: no shadows or post-processing, fewer cars. For older phones.

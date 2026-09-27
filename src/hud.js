@@ -32,14 +32,15 @@ export class HUD {
     ctx.fillStyle = '#5b5e63';
     ctx.fillRect(0, 0, size, size);
     for (const b of this.city.blocks) {
-      ctx.fillStyle = b.kind === 'park' ? '#3f6b35' : b.kind === 'mosque' ? '#8c4a36' : b.kind === 'station' ? '#2f6f4a' : b.kind === 'bazaar' ? '#9a7b52' : '#2b2d31';
+      ctx.fillStyle = { park: '#3f6b35', mosque: '#8c4a36', station: '#2f6f4a', bazaar: '#9a7b52', clocktower: '#8a7a5a', fort: '#8c5a3c', dhaba: '#7a5a3a' }[b.kind] || '#2b2d31';
       ctx.fillRect((b.x0 - lo) * S, (b.z0 - lo) * S, (b.x1 - b.x0) * S, (b.z1 - b.z0) * S);
     }
     ctx.fillStyle = '#e8e8e8';
     ctx.font = 'bold 22px system-ui, sans-serif';
     ctx.textAlign = 'center';
     for (const l of this.city.landmarks) {
-      ctx.fillText(l.name === 'CNG Station' ? '⛽ CNG' : l.name === 'Badshahi Masjid' ? '🕌' : '🗼', (l.x - lo) * S, (l.z - lo) * S + 8);
+      const icon = { station: '⛽ CNG', mosque: '🕌', park: '🗼', clocktower: '🕰', fort: '🏰' }[l.kind] || '★';
+      ctx.fillText(icon, (l.x - lo) * S, (l.z - lo) * S + 8);
     }
     this.mapImg = c;
     this.mapLo = lo;

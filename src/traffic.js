@@ -2,23 +2,31 @@
 // and leans on the horn when blocked – i.e. normal Lahore traffic.
 import * as THREE from 'three';
 import { N, HALF_ROAD, LANES, roadCoord } from './config.js';
-import { makeVehicleMesh, TRAFFIC_MIX } from './vehicles.js';
+import { makeVehicleMesh } from './vehicles.js';
+import { CITY } from './cities.js';
+import { contactShadowTexture } from './textures.js';
 import { createRickshawModel } from './rickshaw.js';
 import { Person, randomLook } from './people.js';
 import { rand, pick, chance, clamp, damp, wrapAngle } from './util.js';
 
 const DX = [1, 0, -1, 0];
 const DZ = [0, 1, 0, -1];
-const SPEEDS = { sedan: 12.5, hatch: 11.5, van: 10.5, pickup: 10.5, bus: 9, bike: 13, rickshaw: 9.5 };
+const SPEEDS = { sedan: 12.5, hatch: 11.5, van: 10.5, pickup: 10.5, bus: 9, bike: 13, rickshaw: 9.5, truck: 8.5, tonga: 4.6, donkey: 3.6 };
+// How far a vehicle flies when rammed, and how much speed the rickshaw keeps
+const PUSH = { bike: 1.3, rickshaw: 1.15, hatch: 1.0, sedan: 0.9, van: 0.85, pickup: 0.8, donkey: 0.3, tonga: 0.25, bus: 0.16, truck: 0.1 };
+const KEEP = { bike: 0.95, rickshaw: 0.9, hatch: 0.86, sedan: 0.84, van: 0.8, pickup: 0.8, donkey: 0.5, tonga: 0.45, bus: 0.25, truck: 0.18 };
+const SLOW = new Set(['bike', 'rickshaw', 'bus', 'truck', 'tonga', 'donkey']);
+let shadowMat = null;
 
 const valid = (i, j) => i >= 0 && j >= 0 && i <= N && j <= N;
 
 export class Traffic {
-  constructor(scene, count = 50) {
+  constructor(scene, city, count = 50) {
     this.scene = scene;
+    this.city = city;
     this.list = [];
     const bag = [];
-    for (const [t, w] of TRAFFIC_MIX) for (let k = 0; k < w; k++) bag.push(t);
+    for (const [t, w] of CITY.traffic) for (let k = 0; k < w; k++) bag.push(t);
     for (let n = 0; n < count; n++) {
       const type = bag[n % bag.length];
       this.list.push(this.makeVehicle(type));
@@ -30,6 +38,7 @@ export class Traffic {
     let group;
     let len;
     let width;
+    let animate = null;
     if (type === 'rickshaw') {
       const colors = [['#0d47a1', '#ffffff'], ['#b71c1c', '#f7c600'], ['#1b5e20', '#f7c600'], ['#f7c600', '#1b5e20'], ['#263238', '#e53935']];
       const [c, t] = pick(colors);
@@ -43,6 +52,7 @@ export class Traffic {
       group.add(m.group);
       len = m.len;
       width = m.width;
+      animate = m.animate || null;
       if (type === 'bike') {
         const rider = new Person(randomLook(true));
         rider.sit();
@@ -63,12 +73,23 @@ export class Traffic {
       }
     }
     group.traverse((o) => {
-      if (o.isMesh) o.castShadow = true;
+      if (o.isMesh && !/^bulb/.test(o.name)) o.castShadow = true;
     });
+    // soft contact shadow so vehicles sit on the road
+    if (!shadowMat) {
+      shadowMat = new THREE.MeshBasicMaterial({
+        map: contactShadowTexture(), transparent: true, depthWrite: false, opacity: 0.8,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      });
+    }
+    const blob = new THREE.Mesh(new THREE.PlaneGeometry(width * 1.35, len * 1.1).rotateX(-Math.PI / 2), shadowMat);
+    blob.position.y = 0.02;
+    blob.renderOrder = 1;
+    group.add(blob);
     this.scene.add(group);
-    const lanePref = type === 'bike' || type === 'rickshaw' || type === 'bus' ? 1 : chance(0.6) ? 0 : 1;
+    const lanePref = SLOW.has(type) ? 1 : chance(0.6) ? 0 : 1;
     return {
-      type, group, len, width,
+      type, group, len, width, animate, knocked: null, hitCD: 0, pushCD: 0,
       vmax: SPEEDS[type] * rand(0.85, 1.12),
       speed: 0, x: 0, z: 0, yaw: 0,
       lane: LANES[lanePref] + rand(-0.35, 0.35) * (type === 'bike' ? 2 : 1),
@@ -98,6 +119,8 @@ export class Traffic {
       const clash = this.list.some((o) => o !== v && o.pts && Math.hypot(o.x - v.x, o.z - v.z) < 12);
       if (clash) continue;
       v.speed = v.vmax * 0.6;
+      v.knocked = null;
+      v.group.rotation.set(0, v.yaw, 0);
       return;
     }
   }
@@ -214,8 +237,14 @@ export class Traffic {
     for (const v of agents) {
       // recycle cars that drifted far from the player
       const dp = Math.hypot(v.x - pAgent.x, v.z - pAgent.z);
+      v.hitCD -= dt;
+      v.pushCD -= dt;
       if (dp > 230) {
         this.spawn(v, pAgent);
+        continue;
+      }
+      if (v.knocked) {
+        this.updateKnocked(v, dt, player, dp, events);
         continue;
       }
       const fx = Math.sin(v.yaw);
@@ -284,7 +313,7 @@ export class Traffic {
           v.blockedByPlayer += dt;
           v.honkT -= dt;
           if (v.blockedByPlayer > 1 && v.honkT <= 0) {
-            events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus' || v.type === 'van' });
+            events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus' || v.type === 'van', vtype: v.type });
             v.honkT = rand(0.6, 2.5);
           }
         } else if (v.stuck > 5 && blockedBy && Math.abs(wrapAngle(blockedBy.yaw - v.yaw)) > 0.6) {
@@ -293,14 +322,14 @@ export class Traffic {
         } else if (v.stuck > 3) {
           v.honkT -= dt;
           if (v.honkT <= 0 && dp < 80) {
-            events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus' });
+            events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus', vtype: v.type });
             v.honkT = rand(2, 5);
           }
         }
       } else {
         v.stuck = 0;
         v.blockedByPlayer = 0;
-        if (Math.random() < dt * 0.02 && dp < 60) events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus' });
+        if (Math.random() < dt * 0.02 && dp < 60) events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus', vtype: v.type });
       }
       v.ghost -= dt;
       const acc = target > v.speed ? 2.6 : -8;
@@ -322,16 +351,157 @@ export class Traffic {
       // bikes lean into turns
       if (v.type === 'bike') v.group.rotation.z = v.turning && v.d > straight ? (v.next === (v.dir + 3) % 4 ? -0.2 : 0.2) : 0;
 
-      // physical contact with the player
-      if (dp < 8) {
-        const n = v.type === 'bus' ? 3 : v.type === 'bike' ? 1 : 2;
-        for (let k = 0; k < n; k++) {
-          const off = n === 1 ? 0 : (k / (n - 1) - 0.5) * (v.len - v.width);
-          if (player.collideDynamic(v.x + fx * off, v.z + fz * off, v.width / 2, events)) {
-            v.speed = Math.min(v.speed, 1);
-          }
-        }
+      if (v.animate) v.animate(dt, v.speed);
+      if (dp < 10) this.contact(v, player, events);
+    }
+  }
+
+  // Circles approximating a vehicle's footprint
+  circles(v) {
+    const fx = Math.sin(v.yaw);
+    const fz = Math.cos(v.yaw);
+    const n = v.len > 6 ? 3 : v.len < 2.2 ? 1 : 2;
+    const out = [];
+    for (let k = 0; k < n; k++) {
+      const off = n === 1 ? 0 : (k / (n - 1) - 0.5) * (v.len - v.width);
+      out.push([v.x + fx * off, v.z + fz * off, off]);
+    }
+    return out;
+  }
+
+  // The rickshaw touched this vehicle: shove it GTA-style and let the rickshaw carry on
+  contact(v, player, events) {
+    const r = v.width / 2;
+    const heavy = KEEP[v.type] < 0.5;
+    for (const [cx, cz, off] of this.circles(v)) {
+      const hit = player.contactVehicle(cx, cz, r, heavy ? 0.8 : 0.2);
+      if (!hit) continue;
+      // push the vehicle out of the overlap
+      const share = heavy ? 0.2 : 0.8;
+      v.x -= hit.nx * hit.pen * share;
+      v.z -= hit.nz * hit.pen * share;
+      const pfx = Math.sin(player.yaw);
+      const pfz = Math.cos(player.yaw);
+      // closing speed relative to the other vehicle's own motion
+      const cvx = v.knocked ? v.knocked.vx : Math.sin(v.yaw) * v.speed;
+      const cvz = v.knocked ? v.knocked.vz : Math.cos(v.yaw) * v.speed;
+      const closing = hit.into - (cvx * -hit.nx + cvz * -hit.nz);
+      if (closing > 1.2 && v.pushCD <= 0) {
+        v.pushCD = 0.3;
+        // impulse direction: away from the rickshaw, biased along its travel
+        let dx = -hit.nx + pfx * 0.9 * Math.sign(player.speed);
+        let dz = -hit.nz + pfz * 0.9 * Math.sign(player.speed);
+        const dl = Math.hypot(dx, dz) || 1;
+        dx /= dl;
+        dz /= dl;
+        const mag = closing * PUSH[v.type] * (0.85 + Math.random() * 0.25);
+        const vf = Math.sin(v.yaw);
+        const vfz = Math.cos(v.yaw);
+        this.knock(v, dx * mag + vf * v.speed * 0.6, dz * mag + vfz * v.speed * 0.6,
+          (off * (vf * dz - vfz * dx) * mag * 0.35 + (Math.random() - 0.5) * mag * 0.25) * (v.type === 'bus' || v.type === 'truck' ? 0.2 : 1),
+          Math.sign(vf * dz - vfz * dx) || 1);
+        // the rickshaw keeps rolling, a little slower
+        player.speed *= KEEP[v.type];
+        const strength = Math.min(1, closing / 12);
+        if (v.hitCD <= 0 && closing > 2.5) {
+          v.hitCD = 1.5;
+          events.push({ type: 'carHit', vtype: v.type, strength, x: hit.px, z: hit.pz, heavy });
+        } else events.push({ type: 'scrape', strength: strength * 0.5, x: hit.px, z: hit.pz });
+        if (heavy && closing > 3) player.crash(closing, events);
+      } else {
+        v.speed = Math.min(v.speed, 0.5);
+      }
+      v.group.position.set(v.x, 0, v.z);
+      return;
+    }
+  }
+
+  knock(v, vx, vz, spin, side) {
+    if (!v.knocked) {
+      v.knocked = { vx: 0, vz: 0, spin: 0, t: 0, settle: 0, roll: 0, rollV: 0, fall: 0, honk: 2 };
+    }
+    const k = v.knocked;
+    k.vx = vx;
+    k.vz = vz;
+    k.spin += spin;
+    k.settle = 0;
+    k.rollV += side * Math.min(4, Math.hypot(vx, vz) * 0.35);
+    if (v.type === 'bike' || (v.type === 'rickshaw' && Math.hypot(vx, vz) > 9)) k.fall = side;
+    v.speed = 0;
+  }
+
+  updateKnocked(v, dt, player, dp, events) {
+    const k = v.knocked;
+    k.t += dt;
+    v.x += k.vx * dt;
+    v.z += k.vz * dt;
+    v.yaw += k.spin * dt;
+    const fr = Math.exp(-(v.type === 'bike' ? 1.3 : 1.9) * dt);
+    k.vx *= fr;
+    k.vz *= fr;
+    k.spin *= Math.exp(-2.6 * dt);
+    const sp = Math.hypot(k.vx, k.vz);
+    // bounce off walls, poles and parked stuff
+    for (const [cx, cz] of this.circles(v)) {
+      const p = { x: cx, z: cz };
+      const hit = this.city.collideCircle(p, v.width / 2);
+      if (!hit) continue;
+      v.x += p.x - cx;
+      v.z += p.z - cz;
+      const vn = k.vx * hit.nx + k.vz * hit.nz;
+      if (vn < 0) {
+        k.vx -= 1.4 * vn * hit.nx;
+        k.vz -= 1.4 * vn * hit.nz;
+        k.spin += (Math.random() - 0.5) * -vn * 0.8;
+        if (-vn > 3) events.push({ type: 'impact', strength: Math.min(1, -vn / 10), x: cx, z: cz });
       }
     }
+    // chain reactions with other traffic
+    if (sp > 1.5) {
+      for (const o of this.list) {
+        if (o === v || o.hitCD > 0) continue;
+        const dx = o.x - v.x;
+        const dz = o.z - v.z;
+        const rr = (o.width + v.width) / 2 + Math.min(o.len, v.len) * 0.25;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > rr * rr || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2);
+        const nx = dx / d;
+        const nz = dz / d;
+        const rel = k.vx * nx + k.vz * nz;
+        if (rel <= 0.5) continue;
+        const pushO = rel * Math.min(1, PUSH[o.type] * 1.4);
+        const ov = o.knocked ? [o.knocked.vx, o.knocked.vz] : [Math.sin(o.yaw) * o.speed, Math.cos(o.yaw) * o.speed];
+        this.knock(o, ov[0] * 0.5 + nx * pushO, ov[1] * 0.5 + nz * pushO, (Math.random() - 0.5) * pushO * 0.5, Math.random() < 0.5 ? -1 : 1);
+        o.hitCD = 0.5;
+        k.vx -= nx * rel * 0.55;
+        k.vz -= nz * rel * 0.55;
+        events.push({ type: 'impact', strength: Math.min(1, rel / 8), x: (o.x + v.x) / 2, z: (o.z + v.z) / 2 });
+      }
+    }
+    // body wobble, or tipping over for bikes
+    k.rollV += (-k.roll * 60 - k.rollV * 6) * dt;
+    k.roll += k.rollV * dt;
+    const g = v.group;
+    g.position.set(v.x, 0, v.z);
+    g.rotation.y = v.yaw;
+    if (k.fall) {
+      g.rotation.z += (k.fall * 1.35 - g.rotation.z) * Math.min(1, dt * 6);
+      g.position.y = Math.abs(Math.sin(g.rotation.z)) * 0.25;
+    } else g.rotation.z = k.roll * 0.08;
+    if (v.animate) v.animate(dt, sp);
+    if (dp < 10) this.contact(v, player, events);
+    // the other driver honks furiously once things settle
+    if (sp < 0.4) {
+      k.settle += dt;
+      k.honk -= dt;
+      if (k.honk <= 0 && k.settle < 6 && dp < 60 && v.type !== 'tonga' && v.type !== 'donkey') {
+        events.push({ type: 'honk', x: v.x, z: v.z, big: v.type === 'bus' || v.type === 'truck', angry: true, vtype: v.type });
+        k.honk = 0.9 + Math.random();
+      }
+    }
+    v.speed = 0;
+    // tow it away once the player has moved on
+    if ((k.settle > 5 && dp > 35) || k.t > 40) this.spawn(v, { x: player.pos.x, z: player.pos.z });
   }
 }
